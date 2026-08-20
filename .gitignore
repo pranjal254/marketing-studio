@@ -1,0 +1,19 @@
+node_modules
+dist
+.npm-cache
+.DS_Store
+*.local
+
+# Internal LevelShift documents - never commit these
+LevelShift-*.html
+LevelShift-*.docx
+C2C-Phase1-Tech-Stack.html
+*.docx
+
+# Local tooling and session files
+.claude/
+.playwright/
+.playwright-cli/
+.vercel/
+*.png
+!public/*.png
