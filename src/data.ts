@@ -114,6 +114,27 @@ export function relTime(ts: number, now: number): string {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
+/* Activity timestamp: relative while fresh, then an actual date and time.
+   "just now" / "24 min ago" / "Today 14:32" / "Yesterday 09:15" / "18 Aug, 14:32" / "18 Aug 2025" */
+export function stampTime(ts: number, now: number): string {
+  const mins = Math.round((now - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const d = new Date(ts);
+  const ref = new Date(now);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (d.toDateString() === ref.toDateString()) return `Today ${time}`;
+  if (d.toDateString() === new Date(now - 86400000).toDateString()) return `Yesterday ${time}`;
+  const date = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  if (d.getFullYear() === ref.getFullYear()) return `${date}, ${time}`;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/* Full timestamp for hover tooltips on activity lines */
+export function fullStamp(ts: number): string {
+  return new Date(ts).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 /* ---------- Telemetry seed ---------- */
 
 let evSeq = 0;

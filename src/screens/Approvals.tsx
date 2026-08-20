@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CaretRight, Check, Clock, FileText, PaperPlaneTilt, Timer, Warning } from "@phosphor-icons/react";
 import { openTasksFor, personById, slaInfo, useStore } from "../store";
-import { relTime } from "../data";
+import { fullStamp, stampTime } from "../data";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
 import type { Asset, Task } from "../types";
@@ -32,7 +32,7 @@ export default function ApprovalsScreen() {
             const campaign = state.campaigns.find((c) => c.id === task.campaignId);
             return (
               <button key={task.id} className={`queue-item${selected?.id === task.id ? " active" : ""}`} onClick={() => setSelectedId(task.id)}>
-                <div><strong>{task.title}</strong><small>{campaign?.name} · {relTime(task.createdAt, now)}</small></div>
+                <div><strong>{task.title}</strong><small>{campaign?.name} · {stampTime(task.createdAt, now)}</small></div>
                 <CaretRight size={14} />
               </button>
             );
@@ -313,7 +313,7 @@ function ChainPanel({ campaignId }: { campaignId: string }) {
               {i > 0 && <i className="chain-sep" aria-hidden="true"><CaretRight size={12} /></i>}
               <Avatar initials={person?.initials ?? "?"} />
               <b>{a.action}</b>
-              <small>{person?.name} · {relTime(a.at, now)}</small>
+              <small>{person?.name} · {stampTime(a.at, now)}</small>
               <code className="chain-hash">{a.hash}</code>
             </span>
           );

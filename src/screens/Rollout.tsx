@@ -6,7 +6,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { ArrowRight, Check, Clock, HourglassMedium, LockSimple, Robot, UserCircle } from "@phosphor-icons/react";
 import { campaignCost, personById, slaInfo, useStore } from "../store";
-import { agentMeta, journeySteps, phaseLabels, relTime, toneVars } from "../data";
+import { agentMeta, journeySteps, phaseLabels, stampTime, toneVars } from "../data";
 import { useNav } from "../nav";
 import { Avatar, CampaignStateChip, Chip, Monogram } from "../ui";
 import type { AgentKey, AppState, Campaign, Role, Task } from "../types";
@@ -322,14 +322,14 @@ function NodeDetailPanel({ campaign, selectedId, gates, onOpenTrace, onGo, viewe
         </div>
         {info.status === "waiting" && info.task && (
           <>
-            <p className="wf-panel-copy">{info.task.title}: {info.task.detail}. Assigned {relTime(info.task.createdAt, now)}{sla ? `, ${sla.remaining}` : ""}{info.task.escalated ? ", escalated" : ""}.</p>
+            <p className="wf-panel-copy">{info.task.title}: {info.task.detail}. Assigned {stampTime(info.task.createdAt, now)}{sla ? `, ${sla.remaining}` : ""}{info.task.escalated ? ", escalated" : ""}.</p>
             {info.task.assigneeId === viewerId
               ? <button className="primary-button" onClick={() => onGo({ page: "approvals", taskId: info.task!.id })}>Open your task <ArrowRight size={13} /></button>
               : <p className="wf-panel-note">Only {person?.name.split(" ")[0]} can clear this gate. Agents wait; the SLA watch nudges automatically.</p>}
           </>
         )}
         {info.status === "done" && (
-          <p className="wf-panel-copy">Cleared{person ? ` by ${person.name}` : ""}{info.approvalAt ? ` ${relTime(info.approvalAt, now)}` : ""}{info.approvalHash ? <> · recorded with hash <code>{info.approvalHash}</code></> : ""}.</p>
+          <p className="wf-panel-copy">Cleared{person ? ` by ${person.name}` : ""}{info.approvalAt ? ` ${stampTime(info.approvalAt, now)}` : ""}{info.approvalHash ? <> · recorded with hash <code>{info.approvalHash}</code></> : ""}.</p>
         )}
         {info.status === "upcoming" && (
           <p className="wf-panel-copy">Not reached yet. When the pipeline arrives here, the Quality Gate routes the decision to the {info.def.role} with a 2-business-day SLA.</p>
@@ -367,7 +367,7 @@ function NodeDetailPanel({ campaign, selectedId, gates, onOpenTrace, onGo, viewe
       </div>
       {last ? (
         <div className="wf-last-run">
-          <small>Last run on this campaign · {relTime(last.ts, now)}</small>
+          <small>Last run on this campaign · {stampTime(last.ts, now)}</small>
           <p>{last.summary}</p>
           <div className="wf-panel-actions">
             <button className="secondary-button" onClick={() => onOpenTrace(last.trace_id)}>Open trace</button>

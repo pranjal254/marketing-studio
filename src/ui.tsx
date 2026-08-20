@@ -10,7 +10,7 @@ function useEscape(onClose: () => void) {
 import { ArrowSquareOut, ArrowsClockwise, Microphone, X } from "@phosphor-icons/react";
 import { useRef } from "react";
 import type { Asset, AssetState, CampaignState, TelemetryEvent } from "./types";
-import { agentMeta, relTime } from "./data";
+import { agentMeta, fullStamp, stampTime } from "./data";
 import { personById, useStore } from "./store";
 
 export function Avatar({ initials, size }: { initials: string; size?: "sm" }) {
@@ -147,7 +147,7 @@ export function DocView({ asset }: { asset: Asset }) {
         {v.author.type === "agent" ? <Monogram size="sm">{v.author.agent}</Monogram> : <Avatar initials={author?.initials ?? "?"} />}
         <span>
           <strong>{v.author.type === "agent" ? agentName(v.author.agent) : author?.name ?? "Unknown"}</strong>
-          <small>{relTime(v.ts, now)} · hash <code>{v.hash}</code></small>
+          <small title={fullStamp(v.ts)}>{stampTime(v.ts, now)} · hash <code>{v.hash}</code></small>
         </span>
         {isLatest ? <AssetStateChip state={asset.state} /> : <Chip>Superseded</Chip>}
       </div>
@@ -234,9 +234,9 @@ export function EventLine({ event, showCampaign }: { event: TelemetryEvent; show
       <Monogram size="sm">{event.agent === "studio" ? "ES" : event.agent}</Monogram>
       <span className="event-main">
         <strong>{event.summary}</strong>
-        <small>
+        <small title={fullStamp(event.ts)}>
           {showCampaign && campaign ? `${campaign.name} · ` : ""}
-          {relTime(event.ts, now)}
+          {stampTime(event.ts, now)}
           {actorPerson ? ` by ${actorPerson.name}` : ""}
         </small>
       </span>
@@ -279,7 +279,7 @@ export function TraceDrawer() {
               <div className="span-card" key={e.id}>
                 <div className="span-top">
                   <Monogram size="sm">{e.agent === "studio" ? "ES" : e.agent}</Monogram>
-                  <div><strong>{e.summary}</strong><small>{agentName(e.agent)} · {relTime(e.ts, now)}</small></div>
+                  <div><strong>{e.summary}</strong><small title={fullStamp(e.ts)}>{agentName(e.agent)} · {stampTime(e.ts, now)}</small></div>
                 </div>
                 <dl className="span-grid">
                   <div><dt>Actor</dt><dd>{e.actor.type === "human" ? `Human · ${actorPerson?.name ?? "unknown"}` : e.actor.type === "system" ? "Deterministic module" : "Agent"}</dd></div>

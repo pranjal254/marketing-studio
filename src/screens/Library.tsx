@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, Check, FileText, LockSimple, Timer } from "@phosphor-icons/react";
 import { personById, useStore } from "../store";
-import { relTime } from "../data";
+import { fullStamp, stampTime } from "../data";
 import { useNav } from "../nav";
 import { Avatar, CampaignStateChip, Chip, DocModal, MiniSource, Monogram } from "../ui";
 import type { Asset } from "../types";
@@ -90,7 +90,7 @@ export default function LibraryScreen() {
                 return (
                   <div key={a.id}>
                     <Avatar initials={person?.initials ?? "?"} />
-                    <span><strong>{person?.name}</strong><small>{a.action}<br />{relTime(a.at, now)} · <code>{a.hash}</code></small></span>
+                    <span><strong>{person?.name}</strong><small>{a.action}<br />{stampTime(a.at, now)} · <code>{a.hash}</code></small></span>
                     <Chip tone="green">Recorded</Chip>
                   </div>
                 );

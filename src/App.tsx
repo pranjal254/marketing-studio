@@ -5,7 +5,7 @@ import {
   UsersThree, type Icon,
 } from "@phosphor-icons/react";
 import type { PageKey } from "./types";
-import { relTime, roleTypes, toneVars } from "./data";
+import { fullStamp, roleTypes, stampTime, toneVars } from "./data";
 import { StoreProvider, openTasksFor, useStore } from "./store";
 import { NavContext, useNav, type NavTarget } from "./nav";
 import { Avatar, MicButton, Modal, Toast, TraceDrawer, useAutoCloseDetails } from "./ui";
@@ -129,7 +129,7 @@ function NotificationsBell() {
                 <span className="notif-mark">{campaign ? campaign.code : <Bell size={14} />}</span>
                 <span className="notif-body">
                   <p>{n.text}</p>
-                  <small>{campaign ? `${campaign.name} · ` : ""}{relTime(n.ts, now)}</small>
+                  <small title={fullStamp(n.ts)}>{campaign ? `${campaign.name} · ` : ""}{stampTime(n.ts, now)}</small>
                 </span>
                 {!n.read && <span className="notif-dot" aria-label="Unread" />}
               </button>

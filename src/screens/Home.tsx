@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ArrowRight, CalendarBlank, CaretRight, ListChecks, Package, Plus, Robot, SealCheck, SquaresFour } from "@phosphor-icons/react";
 import { computeKpis, campaignCost, openTasksFor, personById, slaInfo, useStore } from "../store";
-import { relTime, roleTypes } from "../data";
+import { roleTypes, stampTime } from "../data";
 import { useNav } from "../nav";
 import { Avatar, CampaignStateChip, Chip, EventLine, Modal, Monogram, ProgressSteps } from "../ui";
 import type { Task } from "../types";
@@ -120,7 +120,7 @@ export default function HomeScreen() {
                 const campaign = state.campaigns.find((c) => c.id === task.campaignId);
                 return (
                   <article className="need-card" key={task.id}>
-                    <div className="card-top"><Chip tone={taskChipTone(task)}>{task.kind === "gaps" ? "Awaiting your input" : task.kind === "conflict" ? "Due today" : "Decision"}</Chip><span className="card-age">{relTime(task.createdAt, now)}</span></div>
+                    <div className="card-top"><Chip tone={taskChipTone(task)}>{task.kind === "gaps" ? "Awaiting your input" : task.kind === "conflict" ? "Due today" : "Decision"}</Chip><span className="card-age">{stampTime(task.createdAt, now)}</span></div>
                     <div className="person-row"><Avatar initials={viewer.initials} /><div><p className="role-line">{viewer.role}</p><h3>{task.title}</h3></div></div>
                     <p className="card-copy">{task.detail}</p>
                     <div className="context-line">{campaign?.name}</div>

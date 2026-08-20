@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, ShieldCheck } from "@phosphor-icons/react";
 import { useStore } from "../store";
-import { agentMeta, governance } from "../data";
+import { agentMeta, governance, stampTime } from "../data";
 import { useNav } from "../nav";
 import { Chip, Modal, Monogram } from "../ui";
 
@@ -32,7 +32,7 @@ export default function AgentsScreen() {
               </div>
               <div className="guardrail-line"><ShieldCheck size={16} /><p><small>Autonomy boundary</small><strong>{agent.autonomyLine}</strong></p></div>
               <button className="agent-open" onClick={() => go({ page: "activity", agentFilter: agent.key })}>
-                {runs.length ? `View ${runs.length} runs${lastRun ? `, last ${Math.max(1, Math.round((now - lastRun) / 3600000))}h ago` : ""}` : "No runs yet"} <ArrowRight size={13} />
+                {runs.length ? `View ${runs.length} runs${lastRun ? ` · last ${stampTime(lastRun, now)}` : ""}` : "No runs yet"} <ArrowRight size={13} />
               </button>
             </article>
           );

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText } from "@phosphor-icons/react";
 import { campaignCost, openTasksFor, personById, useStore } from "../store";
-import { flagshipDoc, journeySteps, phaseLabels, relTime, toneVars } from "../data";
+import { flagshipDoc, fullStamp, journeySteps, phaseLabels, stampTime, toneVars } from "../data";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
@@ -50,7 +50,7 @@ export default function CampaignsScreen() {
                 {latest && (
                   <>
                     <span className="line-agent-name"><i aria-hidden="true" />{agentName(latest.agent)}</span>
-                    <small>{relTime(latest.ts, now)}</small>
+                    <small title={fullStamp(latest.ts)}>{stampTime(latest.ts, now)}</small>
                   </>
                 )}
               </div>
@@ -131,7 +131,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
             ))}
           </section>
           <section className="journey-detail">
-            <div className="detail-agent"><Monogram>{events[0] && events[0].agent !== "studio" ? events[0].agent : "ES"}</Monogram><div><p className="meta-label">Latest activity</p><h2>{events[0]?.summary ?? "No activity yet"}</h2><p>{events[0] ? `${relTime(events[0].ts, now)} · click any journey step's Trace for the telemetry behind it.` : "Telemetry appears as soon as an agent runs."}</p></div></div>
+            <div className="detail-agent"><Monogram>{events[0] && events[0].agent !== "studio" ? events[0].agent : "ES"}</Monogram><div><p className="meta-label">Latest activity</p><h2>{events[0]?.summary ?? "No activity yet"}</h2><p>{events[0] ? `${stampTime(events[0].ts, now)} · click any journey step's Trace for the telemetry behind it.` : "Telemetry appears as soon as an agent runs."}</p></div></div>
             <div className="detail-metrics">
               <div><small>Events logged</small><strong>{events.length}</strong></div>
               <div><small>Human approvals</small><strong>{state.approvals.filter((a) => a.campaignId === campaign.id).length}</strong></div>
