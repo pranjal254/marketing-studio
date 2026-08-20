@@ -27,7 +27,7 @@ export default function CampaignsScreen() {
               onClick={() => go({ page: "campaigns", campaignId: c.id })}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go({ page: "campaigns", campaignId: c.id }); } }}>
               <span className="line-dot" aria-hidden="true" />
-              <Monogram size="lg">{c.code}</Monogram>
+              <Monogram>{c.code}</Monogram>
               <div className="line-main">
                 <h3>{c.name}</h3>
                 <p>{c.vertical} · {c.campaignType}</p>

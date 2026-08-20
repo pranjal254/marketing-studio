@@ -105,8 +105,8 @@ function NotificationsBell() {
 
   return (
     <div className="bell-wrap" ref={wrapRef}>
-      <button aria-label={`Notifications, ${unread} unread`} aria-expanded={open} className={`notification${open ? " open" : ""}`} onClick={() => setOpen(!open)}>
-        <Bell size={17} weight={unread > 0 ? "fill" : "regular"} />{unread > 0 && <span className="bell-count">{unread}</span>}
+      <button aria-label={`Notifications, ${unread} unread`} aria-expanded={open} className={`notification${open ? " open" : ""}${unread > 0 ? " has-unread" : ""}`} onClick={() => setOpen(!open)}>
+        <Bell size={18} weight={unread > 0 ? "duotone" : "regular"} />{unread > 0 && <span className="bell-count">{unread}</span>}
       </button>
       {open && (
         <div className="notif-panel" role="dialog" aria-label="Notifications">

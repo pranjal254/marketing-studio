@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   Background, Controls, Handle, MarkerType, Position, ReactFlow,
   type Edge, type Node, type NodeProps, type NodeTypes,
@@ -90,9 +90,10 @@ function AgentFlowNode({ data }: NodeProps) {
   return (
     <div className={`wf-node wf-agent ${d.status}`}>
       <FlowHandles />
-      <div className="wf-node-top"><span className="wf-mono">{d.agent}</span><span className="wf-kind"><Robot size={11} /> Agent</span><span className="wf-step">0{d.n}</span></div>
+      <div className="wf-node-top"><span className="wf-mono">{d.agent}</span><span className="wf-kind"><Robot size={11} /> AI agent</span><span className="wf-step">0{d.n}</span></div>
       <strong>{d.title}</strong>
       <small>{d.owner}</small>
+      <span className="wf-bar" aria-hidden="true"><i /></span>
       <StatusBadge status={d.status} />
     </div>
   );
@@ -107,6 +108,7 @@ function GateFlowNode({ data }: NodeProps) {
       <div className="wf-node-top"><span className="wf-avatar">{d.initials}</span><span className="wf-kind human"><UserCircle size={11} /> Human gate</span></div>
       <strong>{d.title}</strong>
       <small>{d.person}</small>
+      <span className="wf-bar" aria-hidden="true"><i /></span>
       <StatusBadge status={d.status} label={label} />
     </div>
   );
@@ -155,30 +157,29 @@ export default function RolloutScreen() {
   const { nodes, edges } = useMemo(() => {
     // Three-row snake, five chain slots per row. Agents sit on the row line,
     // human gates drop slightly below it, so every handoff to a person reads as a dip.
-    const COLS = 5, SLOT_W = 178, ROW_H = 236, GATE_DROP = 56;
-    const pos = (id: string, drop: number) => {
-      const idx = CHAIN.indexOf(id);
-      return { x: (idx % COLS) * SLOT_W, y: Math.floor(idx / COLS) * ROW_H + drop };
-    };
+    const COLS = 5, SLOT_W = 200, ROW_H = 252, GATE_DROP = 62;
+    const slot = (id: string) => CHAIN.indexOf(id);
+    const pos = (id: string, drop: number) => ({ x: (slot(id) % COLS) * SLOT_W, y: Math.floor(slot(id) / COLS) * ROW_H + drop });
+    const stagger = (id: string) => ({ "--i": slot(id) } as CSSProperties);
     const phaseNodes: Node[] = phaseLabels.map((label, i) => ({
-      id: `phase-${i}`, type: "phase", position: { x: -196, y: i * ROW_H + 24 },
+      id: `phase-${i}`, type: "phase", position: { x: -190, y: i * ROW_H + 28 },
       draggable: false, selectable: false, focusable: false, style: { pointerEvents: "none" },
       data: { label, steps: `Steps 0${i * 3 + 1} to 0${i * 3 + 3}` },
     }));
     const stepNodes: Node[] = journeySteps.filter((s) => s.agent !== "human").map((s) => ({
-      id: `s${s.n}`, type: "agent", position: pos(`s${s.n}`, 0), draggable: false, selected: selectedId === `s${s.n}`,
+      id: `s${s.n}`, type: "agent", position: pos(`s${s.n}`, 0), draggable: false, selected: selectedId === `s${s.n}`, style: stagger(`s${s.n}`),
       data: { n: s.n, agent: s.agent as AgentKey, title: s.title, owner: s.owner, status: stepStatus(campaign, s.n) },
     }));
     const gateNodes: Node[] = GATES.map((g) => {
       const info = gates.get(g.id)!;
       const person = info.personId ? personById(state, info.personId) : undefined;
       return {
-        id: g.id, type: "gate", position: pos(g.id, GATE_DROP), draggable: false, selected: selectedId === g.id,
+        id: g.id, type: "gate", position: pos(g.id, GATE_DROP), draggable: false, selected: selectedId === g.id, style: stagger(g.id),
         data: { title: g.title, status: info.status, initials: person?.initials ?? "?", person: person?.name ?? g.role },
       };
     });
     const lockNode: Node = {
-      id: "lock", type: "lock", position: pos("lock", 20), draggable: false, selected: selectedId === "lock",
+      id: "lock", type: "lock", position: pos("lock", 30), draggable: false, selected: selectedId === "lock", style: stagger("lock"),
       data: { status: campaign.state === "approved_locked" ? "done" : "upcoming" },
     };
     const all = [...phaseNodes, ...stepNodes, ...gateNodes, lockNode];
@@ -189,19 +190,19 @@ export default function RolloutScreen() {
       const target = byId.get(to);
       const tStatus = (target?.data as { status: NodeStatus }).status;
       const live = tStatus === "active" || tStatus === "waiting";
+      const done = tStatus === "done";
       const wraps = Math.floor(i / COLS) !== Math.floor((i + 1) / COLS);
-      const stroke = tStatus === "done" ? "#94a8cf" : live ? "#456bb6" : "#d6d6dc";
+      const stroke = done ? "#0a9268" : live ? "#d97706" : "#cfcfd6";
       edgeList.push({
-        id: `${from}-${to}`, source: from, target: to, type: "smoothstep",
+        id: `${from}-${to}`, source: from, target: to,
+        // Curved edges within a row, orthogonal only for the row wrap
+        type: wraps ? "smoothstep" : "default",
         sourceHandle: wraps ? "outBottom" : "out", targetHandle: wraps ? "inTop" : "in",
-        animated: live,
-        pathOptions: { borderRadius: 18 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 14, height: 14 },
-        style: tStatus === "done"
-          ? { stroke, strokeWidth: 1.6 }
-          : live
-            ? { stroke, strokeWidth: 2 }
-            : { stroke, strokeWidth: 1.4, strokeDasharray: "5 4" },
+        animated: done || live,
+        className: done ? "edge-done" : live ? "edge-live" : "edge-next",
+        ...(wraps ? { pathOptions: { borderRadius: 20 } } : {}),
+        markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 13, height: 13 },
+        style: { stroke, strokeWidth: live ? 2.2 : done ? 1.9 : 1.5, strokeDasharray: done || live ? "7 5" : "3 5" },
       } as Edge);
     }
     return { nodes: all, edges: edgeList };
@@ -253,6 +254,7 @@ export default function RolloutScreen() {
             <div className="wf-legend">
               <span><i className="wf-leg agent" /> Agent</span>
               <span><i className="wf-leg gate" /> Human gate</span>
+              <span><i className="wf-leg done" /> Completed</span>
               <span><i className="wf-leg live" /> Live now</span>
             </div>
           </div>
@@ -271,7 +273,7 @@ export default function RolloutScreen() {
             panOnScroll
             onNodeClick={(_, node) => { if (node.type !== "phase") setSelectedId(node.id); }}
           >
-            <Background gap={22} size={1.4} color="#e7e7ec" />
+            <Background gap={18} size={1.5} color="#dfdfe6" />
             <Controls showInteractive={false} position="bottom-right" />
           </ReactFlow>
         </section>
