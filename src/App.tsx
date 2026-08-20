@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
-  ArrowClockwise, Bell, CaretDown, ChartLineUp, House, ListChecks, MagnifyingGlass,
-  MapTrifold, Package, Question, Robot, SealCheck, SidebarSimple, SquaresFour, UsersThree,
-  type Icon,
+  ArrowClockwise, Bell, BellSlash, CaretDown, ChartLineUp, Checks, FlowArrow, House, ListChecks,
+  MagnifyingGlass, Package, Question, Robot, SealCheck, SidebarSimple, SquaresFour,
+  UsersThree, type Icon,
 } from "@phosphor-icons/react";
 import type { PageKey } from "./types";
-import { relTime, roleTypes } from "./data";
+import { relTime, roleTypes, toneVars } from "./data";
 import { StoreProvider, openTasksFor, useStore } from "./store";
 import { NavContext, useNav, type NavTarget } from "./nav";
-import { Avatar, Chip, Modal, Toast, TraceDrawer } from "./ui";
+import { Avatar, MicButton, Modal, Toast, TraceDrawer, useAutoCloseDetails } from "./ui";
 import HomeScreen from "./screens/Home";
 import IntakeScreen from "./screens/Intake";
 import CampaignsScreen from "./screens/Campaigns";
@@ -60,6 +60,7 @@ function AskBar() {
         <MagnifyingGlass size={16} />
         <input ref={inputRef} value={query} placeholder="Search campaigns and your tasks…" aria-label="Search campaigns and tasks"
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
+        <MicButton onText={(t) => { setQuery(t); setOpen(true); inputRef.current?.focus(); }} />
         <kbd>⌘K</kbd>
       </div>
       {open && (
@@ -87,27 +88,59 @@ function NotificationsBell() {
   const { state, now, viewer, actions } = useStore();
   const { go } = useNav();
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const mine = state.notifications.filter((n) => n.personId === viewer.id).sort((a, b) => b.ts - a.ts);
   const unread = mine.filter((n) => !n.read).length;
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [open]);
+
   return (
-    <div className="bell-wrap">
-      <button aria-label={`Notifications, ${unread} unread`} className="notification" onClick={() => setOpen(!open)}>
-        <Bell size={17} />{unread > 0 && <span className="bell-count">{unread}</span>}
+    <div className="bell-wrap" ref={wrapRef}>
+      <button aria-label={`Notifications, ${unread} unread`} aria-expanded={open} className={`notification${open ? " open" : ""}`} onClick={() => setOpen(!open)}>
+        <Bell size={17} weight={unread > 0 ? "fill" : "regular"} />{unread > 0 && <span className="bell-count">{unread}</span>}
       </button>
       {open && (
-        <div className="notif-panel">
-          <div className="notif-head"><strong>Notifications</strong>{unread > 0 && <button className="text-link" onClick={() => actions.markAllRead()}>Mark all read</button>}</div>
-          {mine.length === 0 && <p className="ask-empty">Nothing yet for {viewer.name.split(" ")[0]}.</p>}
-          {mine.slice(0, 8).map((n) => (
-            <button key={n.id} className={`notif-row${n.read ? "" : " unread"}`} onClick={() => { if (n.campaignId) go({ page: "campaigns", campaignId: n.campaignId }); setOpen(false); }}>
-              <p>{n.text}</p><small>{relTime(n.ts, now)}</small>
-            </button>
-          ))}
+        <div className="notif-panel" role="dialog" aria-label="Notifications">
+          <div className="notif-head">
+            <div className="notif-head-title"><strong>Notifications</strong>{unread > 0 && <span className="notif-unread-chip">{unread} new</span>}</div>
+            {unread > 0 && <button className="text-link" onClick={() => actions.markAllRead()}><Checks size={14} /> Mark all read</button>}
+          </div>
+          {mine.length === 0 && (
+            <div className="notif-empty">
+              <span className="notif-empty-icon"><BellSlash size={20} /></span>
+              <strong>You are all caught up</strong>
+              <p>Agents notify {viewer.name.split(" ")[0]} here the moment a gate, revision or escalation needs attention.</p>
+            </div>
+          )}
+          {mine.slice(0, 8).map((n) => {
+            const campaign = n.campaignId ? state.campaigns.find((c) => c.id === n.campaignId) : undefined;
+            return (
+              <button key={n.id} className={`notif-row${n.read ? "" : " unread"}`} style={campaign ? toneVars(campaign.id, state.campaigns) : undefined}
+                onClick={() => { if (n.campaignId) go({ page: "campaigns", campaignId: n.campaignId }); setOpen(false); }}>
+                <span className="notif-mark">{campaign ? campaign.code : <Bell size={14} />}</span>
+                <span className="notif-body">
+                  <p>{n.text}</p>
+                  <small>{campaign ? `${campaign.name} · ` : ""}{relTime(n.ts, now)}</small>
+                </span>
+                {!n.read && <span className="notif-dot" aria-label="Unread" />}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
+
 
 function Shell() {
   const { state, viewer, actions } = useStore();
@@ -116,6 +149,8 @@ function Shell() {
     try { return localStorage.getItem("shiftai.sidebar") === "collapsed"; } catch { return false; }
   });
   const [helpOpen, setHelpOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDetailsElement>(null);
+  useAutoCloseDetails(profileMenuRef);
   useEffect(() => {
     try { localStorage.setItem("shiftai.sidebar", collapsed ? "collapsed" : "open"); } catch { /* unavailable */ }
   }, [collapsed]);
@@ -127,7 +162,7 @@ function Shell() {
     <main className={`app-shell${collapsed ? " is-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-head">
-          <button className="brand" onClick={() => go("home")}><span className="brand-mark"><img src="/logo-icon.svg" alt="ShiftAI" /></span><span className="brand-text"><strong>ShiftAI</strong><small>Execution Studio</small></span></button>
+          <button className="brand" onClick={() => go("home")}><span className="brand-mark"><img src="/logo-icon.svg" alt="ShiftAI" /></span><span className="brand-text"><strong>ShiftAI</strong><small>Marketing Studio</small></span></button>
           <button className="collapse-toggle" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}><SidebarSimple size={18} /></button>
         </div>
         <nav aria-label="Primary navigation">
@@ -143,8 +178,8 @@ function Shell() {
           })}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`rollout-link${activePage === "rollout" ? " active" : ""}`} title={collapsed ? "Activation roadmap" : undefined} onClick={() => go("rollout")}><span className="nav-icon"><MapTrifold size={18} /></span><span className="nav-text">Activation roadmap</span></button>
-          <details className="menu profile-menu">
+          <button className={`rollout-link${activePage === "rollout" ? " active" : ""}`} title={collapsed ? "Agent workflow" : undefined} onClick={() => go("rollout")}><span className="nav-icon"><FlowArrow size={18} /></span><span className="nav-text">Agent workflow</span></button>
+          <details className="menu profile-menu" ref={profileMenuRef}>
             <summary className="profile" title={collapsed ? viewer.name : undefined}>
               <Avatar initials={viewer.initials} />
               <span className="profile-text"><strong>{viewer.name}</strong><small>{viewer.role}</small></span>

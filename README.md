@@ -1,6 +1,6 @@
 # ShiftAI Content to Campaign
 
-Functional React + Vite build of the ShiftAI Execution Studio front-end, driven by sample agent telemetry (STS v1.1).
+Functional React + Vite build of the ShiftAI Marketing Studio front-end, driven by sample agent telemetry (STS v1.1).
 
 Every number in the app is computed from the telemetry event log, and every action advances shared state: submit a request, answer the agent's gap questions, resolve reviewer conflicts, approve briefs, sign off packages. Use the profile menu to act as different people (Marketing Lead, BU Campaign Lead, Content Writer, Grammar Reviewer) and complete the pipeline end to end. Click any activity line, KPI, or journey step for the trace behind it (actor, model, tokens, cost, timing, state transition). State persists in localStorage; "Reset demo data" in the profile menu restores the seed.
 

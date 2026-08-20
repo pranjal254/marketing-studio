@@ -3,7 +3,7 @@ import { CaretRight, Check, Clock, FileText, PaperPlaneTilt, Timer, Warning } fr
 import { openTasksFor, personById, slaInfo, useStore } from "../store";
 import { relTime } from "../data";
 import { useNav } from "../nav";
-import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MiniSource, Monogram } from "../ui";
+import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
 import type { Asset, Task } from "../types";
 import { DotsThree } from "@phosphor-icons/react";
 
@@ -160,7 +160,7 @@ function ReviewDetail({ task }: { task: Task }) {
                 ))}
               </div>
             </div>
-            <div className="field"><label htmlFor="feedback-note">Note to the agent (optional)</label><input id="feedback-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. opening reads too formal for this channel" /></div>
+            <div className="field"><label htmlFor="feedback-note">Note to the agent (optional, type or dictate)</label><div className="input-with-mic"><input id="feedback-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. opening reads too formal for this channel" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
             {error && <p className="form-error" role="alert">{error}</p>}
             <div className="feedback-actions">
               <button type="submit" className="primary-button"><PaperPlaneTilt size={15} /> Send to agent</button>
@@ -208,7 +208,7 @@ function DecisionFooter({ task, cta, onDecide, allowReturn }: { task: Task; cta:
     <div className="decision-footer">
       {returning ? (
         <form className="return-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (note.trim()) { actions.returnBrief(task.id, note.trim()); } }}>
-          <div className="field"><label htmlFor="return-note">Note to the requester</label><input id="return-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What needs to change before approval?" /></div>
+          <div className="field"><label htmlFor="return-note">Note to the requester (type or dictate)</label><div className="input-with-mic"><input id="return-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What needs to change before approval?" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
           <button type="submit" className="secondary-button" disabled={!note.trim()}>Send back</button>
           <button type="button" className="text-button" onClick={() => setReturning(false)}>Cancel</button>
         </form>
@@ -246,7 +246,7 @@ function ConflictDetail({ task }: { task: Task }) {
       <div className="decision-footer">
         {returning ? (
           <form className="return-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (note.trim()) actions.decideConflict(task.id, "returned", note.trim()); }}>
-            <div className="field"><label htmlFor="conflict-note">Note to reviewers</label><input id="conflict-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should the next revision address?" /></div>
+            <div className="field"><label htmlFor="conflict-note">Note to reviewers (type or dictate)</label><div className="input-with-mic"><input id="conflict-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should the next revision address?" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
             <button type="submit" className="secondary-button" disabled={!note.trim()}>Send back</button>
             <button type="button" className="text-button" onClick={() => setReturning(false)}>Cancel</button>
           </form>

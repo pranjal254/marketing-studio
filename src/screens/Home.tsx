@@ -83,7 +83,7 @@ export default function HomeScreen() {
     tiles = orgTiles;
     actions = (<>
       <button className="primary-button" onClick={() => go("intake")}><Plus size={16} weight="bold" /> New campaign request</button>
-      <button className="outline-button" onClick={() => go("rollout")}><CalendarBlank size={16} /> View 12-week rollout</button>
+      <button className="outline-button" onClick={() => go("rollout")}><CalendarBlank size={16} /> View agent workflow</button>
     </>);
   }
 

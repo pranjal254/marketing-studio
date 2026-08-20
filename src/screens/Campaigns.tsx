@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText } from "@phosphor-icons/react";
 import { campaignCost, openTasksFor, personById, useStore } from "../store";
-import { flagshipDoc, journeySteps, phaseLabels, relTime } from "../data";
+import { flagshipDoc, journeySteps, phaseLabels, relTime, toneVars } from "../data";
 import { useNav } from "../nav";
-import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, EventLine, MiniSource, Monogram, ProgressSteps } from "../ui";
+import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
 
 export default function CampaignsScreen() {
-  const { state } = useStore();
+  const { state, now } = useStore();
   const { nav, go } = useNav();
   const selected = nav.campaignId ? state.campaigns.find((c) => c.id === nav.campaignId) : undefined;
   if (selected) return <CampaignDetail campaign={selected} />;
@@ -15,17 +15,49 @@ export default function CampaignsScreen() {
   const ordered = [...state.campaigns].sort((a, b) => (a.state === "approved_locked" ? 1 : 0) - (b.state === "approved_locked" ? 1 : 0) || b.step - a.step);
   return (
     <div className="screen-content campaigns-screen">
-      <section className="simple-page-header"><div><h1>Campaigns</h1><p>Every campaign in the workspace, its journey position and live cost. Click one to open the journey.</p></div></section>
-      <section className="campaign-list">
+      <section className="simple-page-header"><div><h1>Campaigns</h1><p>Every campaign in the workspace, color-coded, with its journey position, live cost and what the agents did last.</p></div></section>
+      <section className="campaign-listing">
         {ordered.map((c) => {
           const cost = campaignCost(state, c.id);
           const open = state.tasks.filter((t) => t.campaignId === c.id && t.status === "open");
+          const owner = personById(state, c.ownerId);
+          const latest = [...state.events].reverse().find((e) => e.campaignId === c.id);
           return (
-            <article className="campaign-row" key={c.id} onClick={() => go({ page: "campaigns", campaignId: c.id })}>
-              <Monogram>{c.code}</Monogram>
-              <div className="campaign-main"><div className="title-line"><h3>{c.name}</h3><CampaignStateChip state={c.state} /></div><p>{c.vertical} · {c.campaignType}</p><ProgressSteps active={c.state === "approved_locked" ? 9 : c.step - 1} /></div>
-              <div className="campaign-stat"><small>Step</small><strong>{c.state === "approved_locked" ? "Complete" : journeySteps[c.step - 1].title}</strong><span>{c.step} of 9</span></div>
-              <div className="campaign-stat"><small>Open gates</small><strong>{open.length === 0 ? "None" : `${open.length} waiting`}</strong><span>{cost > 0 ? `$${cost.toFixed(2)} AI cost` : "No spend yet"}</span></div>
+            <article className="campaign-line" key={c.id} style={toneVars(c.id, state.campaigns)} role="button" tabIndex={0}
+              onClick={() => go({ page: "campaigns", campaignId: c.id })}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go({ page: "campaigns", campaignId: c.id }); } }}>
+              <span className="line-dot" aria-hidden="true" />
+              <Monogram size="lg">{c.code}</Monogram>
+              <div className="line-main">
+                <h3>{c.name}</h3>
+                <p>{c.vertical} · {c.campaignType}</p>
+                <CampaignStateChip state={c.state} />
+              </div>
+              <div className="line-journey">
+                <small>Journey</small>
+                <strong>{c.state === "approved_locked" ? "Complete" : `Step ${c.step} of 9`}</strong>
+                <ProgressSteps active={c.state === "approved_locked" ? 9 : c.step - 1} />
+              </div>
+              <div className="line-col">
+                <small>Waiting on</small>
+                <strong>{open.length === 0 ? (c.state === "approved_locked" ? "Nobody" : "Agents") : personById(state, open[0].assigneeId)?.name.split(" ")[0]}</strong>
+              </div>
+              <div className="line-col">
+                <small>AI cost</small>
+                <strong>${cost.toFixed(2)}</strong>
+              </div>
+              <div className="line-agent">
+                {latest && (
+                  <>
+                    <span className="line-agent-name"><i aria-hidden="true" />{agentName(latest.agent)}</span>
+                    <small>{relTime(latest.ts, now)}</small>
+                  </>
+                )}
+              </div>
+              <div className="line-owner">
+                <Avatar size="sm" initials={owner?.initials ?? "?"} />
+                <small>{owner?.name} · owner</small>
+              </div>
               <span className="row-arrow"><CaretRight size={16} /></span>
             </article>
           );
@@ -49,8 +81,8 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
   const derivatives = assets.filter((a) => !a.id.endsWith("-a0"));
 
   return (
-    <div className="screen-content campaign-screen">
-      <button className="breadcrumb breadcrumb-link" onClick={() => go("campaigns")}>Campaigns <CaretRight size={11} /> {campaign.name}</button>
+    <div className="screen-content campaign-screen" style={toneVars(campaign.id, state.campaigns)}>
+      <button className="breadcrumb breadcrumb-link" onClick={() => go("campaigns")}>Campaigns <CaretRight size={11} /> <span className="crumb-tone">{campaign.name}</span></button>
       <section className="campaign-header">
         <div className="campaign-title-block"><Monogram size="lg">{campaign.code}</Monogram><div><div className="title-line"><h1>{campaign.name}</h1><CampaignStateChip state={campaign.state} /></div><p>{campaign.vertical} {campaign.campaignType.toLowerCase()} · {campaign.window.start} to {campaign.window.end}</p></div></div>
         <div className="header-actions">

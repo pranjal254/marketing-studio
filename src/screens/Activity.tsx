@@ -24,7 +24,7 @@ export default function ActivityScreen() {
       <section className="simple-page-header"><div><h1>Activity log</h1><p>The full STS v1.1 event stream. Every row opens its trace: actor, model, tokens, cost, timing and state transition.</p></div></section>
       <div className="log-filters">
         <div className="field"><label htmlFor="log-search">Search</label><input id="log-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search summaries and activities…" /></div>
-        <div className="field"><label htmlFor="log-agent">Agent</label><select id="log-agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}><option value="all">All agents</option>{agentMeta.map((a) => <option key={a.key} value={a.key}>{a.name}</option>)}<option value="studio">Execution Studio</option></select></div>
+        <div className="field"><label htmlFor="log-agent">Agent</label><select id="log-agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}><option value="all">All agents</option>{agentMeta.map((a) => <option key={a.key} value={a.key}>{a.name}</option>)}<option value="studio">Marketing Studio</option></select></div>
         <div className="field"><label htmlFor="log-campaign">Campaign</label><select id="log-campaign" value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}><option value="all">All campaigns</option>{state.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
       </div>
       <p className="log-meta">{events.length} events · ${totalCost.toFixed(2)} total cost in view</p>

@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { PaperPlaneTilt } from "@phosphor-icons/react";
 import { useStore, type IntakeForm } from "../store";
 import { useNav } from "../nav";
-import { EventLine, MiniSource, Monogram } from "../ui";
+import { EventLine, MicButton, MiniSource, Monogram } from "../ui";
 
 const channelOptions = ["LinkedIn", "Email nurture", "Sales enablement", "Web / service page", "Community", "Event"];
 
@@ -70,8 +70,8 @@ export default function IntakeScreen() {
       <div className="intake-layout">
         <form className="intake-card" onSubmit={submit} noValidate>
           <div className="form-grid">
-            <div className="field field-full"><label htmlFor="in-objective">Campaign objective</label><input id="in-objective" value={form.objective} onChange={(e) => set("objective", e.target.value)} placeholder="e.g. Build cloud migration intent in FinServ" /></div>
-            <div className="field field-full"><label htmlFor="in-topic">Offer or topic</label><input id="in-topic" value={form.topic} onChange={(e) => set("topic", e.target.value)} placeholder="e.g. BC cloud readiness assessment" /></div>
+            <div className="field field-full"><label htmlFor="in-objective">Campaign objective (type or dictate)</label><div className="input-with-mic"><input id="in-objective" value={form.objective} onChange={(e) => set("objective", e.target.value)} placeholder="e.g. Build cloud migration intent in FinServ" /><MicButton onText={(t) => set("objective", form.objective ? `${form.objective} ${t}` : t)} /></div></div>
+            <div className="field field-full"><label htmlFor="in-topic">Offer or topic (type or dictate)</label><div className="input-with-mic"><input id="in-topic" value={form.topic} onChange={(e) => set("topic", e.target.value)} placeholder="e.g. BC cloud readiness assessment" /><MicButton onText={(t) => set("topic", form.topic ? `${form.topic} ${t}` : t)} /></div></div>
             <div className="field"><label htmlFor="in-bu">Business unit</label><select id="in-bu" value={form.bu} onChange={(e) => set("bu", e.target.value)}><option value="">Select…</option><option>Business Central</option><option>Finance &amp; Operations</option><option>Cross-BU</option></select></div>
             <div className="field"><label htmlFor="in-vertical">Vertical</label><select id="in-vertical" value={form.vertical} onChange={(e) => set("vertical", e.target.value)}><option value="">Select…</option><option>Financial Services</option><option>Manufacturing</option><option>Technology</option></select></div>
             <div className="field"><label htmlFor="in-segment">Target segment</label><select id="in-segment" value={form.segment} onChange={(e) => set("segment", e.target.value)}><option value="">Select…</option><option>Type 3</option><option>Type 4</option><option>Standard</option></select></div>

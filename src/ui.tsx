@@ -7,7 +7,8 @@ function useEscape(onClose: () => void) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 }
-import { ArrowSquareOut, ArrowsClockwise, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, Microphone, X } from "@phosphor-icons/react";
+import { useRef } from "react";
 import type { Asset, AssetState, CampaignState, TelemetryEvent } from "./types";
 import { agentMeta, relTime } from "./data";
 import { personById, useStore } from "./store";
@@ -66,20 +67,34 @@ export function ProgressSteps({ active = 6 }: { active?: number }) {
   );
 }
 
+/* Close a <details> menu when the user clicks anywhere outside it */
+export function useAutoCloseDetails(ref: { current: HTMLDetailsElement | null }) {
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      const el = ref.current;
+      if (el?.open && !el.contains(e.target as Node)) el.open = false;
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [ref]);
+}
+
 export function Menu({ label, children }: { label: ReactNode; children: ReactNode }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  useAutoCloseDetails(ref);
   return (
-    <details className="menu">
+    <details className="menu" ref={ref}>
       <summary aria-label="More options">{label}</summary>
       <div className="menu-list" onClick={(e) => (e.currentTarget.parentElement as HTMLDetailsElement).open = false}>{children}</div>
     </details>
   );
 }
 
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide, xl }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; xl?: boolean }) {
   useEscape(onClose);
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${wide ? " wide" : ""}`}>
+      <div className={`modal${xl ? " xl" : wide ? " wide" : ""}`}>
         <div className="modal-head"><h2>{title}</h2><button className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button></div>
         <div className="modal-body">{children}</div>
       </div>
@@ -151,16 +166,62 @@ export function DocView({ asset }: { asset: Asset }) {
 
 export function DocModal({ asset, onClose }: { asset: Asset; onClose: () => void }) {
   return (
-    <Modal title={`${asset.name} · ${asset.version}`} onClose={onClose} wide>
+    <Modal title={`${asset.name} · ${asset.version}`} onClose={onClose} xl>
       <DocView asset={asset} />
     </Modal>
+  );
+}
+
+/* ---------- Speech to text (browser Web Speech API, no external service) ---------- */
+
+type RecognitionCtor = new () => {
+  lang: string; interimResults: boolean; continuous: boolean;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null; onerror: (() => void) | null;
+  start: () => void; stop: () => void;
+};
+
+function speechCtor(): RecognitionCtor | undefined {
+  const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition;
+}
+
+export function MicButton({ onText }: { onText: (transcript: string) => void }) {
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<InstanceType<RecognitionCtor> | null>(null);
+  useEffect(() => () => recRef.current?.stop(), []);
+  const Ctor = typeof window !== "undefined" ? speechCtor() : undefined;
+  if (!Ctor) return null;
+
+  function toggle() {
+    if (listening) { recRef.current?.stop(); return; }
+    const rec = new Ctor!();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.onresult = (e) => {
+      const text = Array.from(e.results, (r) => r[0].transcript).join(" ").trim();
+      if (text) onText(text);
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    rec.start();
+    setListening(true);
+  }
+
+  return (
+    <button type="button" className={`mic-button${listening ? " listening" : ""}`} aria-pressed={listening}
+      aria-label={listening ? "Stop dictation" : "Dictate with your voice"} title={listening ? "Listening, click to stop" : "Dictate with your voice"} onClick={toggle}>
+      <Microphone size={14} weight={listening ? "fill" : "regular"} />
+    </button>
   );
 }
 
 /* ---------- Telemetry / explainability ---------- */
 
 export function agentName(key: TelemetryEvent["agent"]): string {
-  if (key === "studio") return "Execution Studio";
+  if (key === "studio") return "Marketing Studio";
   return agentMeta.find((a) => a.key === key)?.name ?? key;
 }
 
@@ -210,7 +271,7 @@ export function TraceDrawer() {
           </div>
           <button className="icon-button" aria-label="Close trace" onClick={() => openTrace(null)}><X size={16} /></button>
         </div>
-        <p className="drawer-sub">{events.length} span{events.length > 1 ? "s" : ""} · total cost ${totalCost.toFixed(2)} · every field below is emitted by the agent and read natively by Execution Studio.</p>
+        <p className="drawer-sub">{events.length} span{events.length > 1 ? "s" : ""} · total cost ${totalCost.toFixed(2)} · every field below is emitted by the agent and read natively by Marketing Studio.</p>
         <div className="trace-spans">
           {events.map((e) => {
             const actorPerson = e.actor.personId ? personById(state, e.actor.personId) : undefined;

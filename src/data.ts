@@ -3,7 +3,7 @@ import type {
   Notification, Person, Role, Task, TelemetryEvent,
 } from "./types";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /* ---------- People ---------- */
 
@@ -34,7 +34,7 @@ export const agentMeta: AgentMeta[] = [
   { key: "CR", name: "Content Repurposing", kind: "AI agent", purpose: "Drafts one flagship, then creates eight channel-native derivatives.", runtime: "Claude Opus 5", model: "claude-opus-5", prompt_version: "p-2.9", guardrail: "Drafts only from sourced claims", autonomyLine: "May draft, self-check, stage and regenerate. May not confirm content, bypass flagship-first sequencing, or publish anywhere." },
   { key: "CO", name: "Collaboration & Iteration", kind: "AI agent", purpose: "Consolidates comments, manages versions and escalates conflicts.", runtime: "Claude Sonnet 5", model: "claude-sonnet-5", prompt_version: "p-1.8", guardrail: "Never resolves reviewer conflicts", autonomyLine: "May stage, notify, consolidate and apply textual edits. May not confirm content, resolve conflicts, or alter sourced claims." },
   { key: "QG", name: "Quality Gate & Approval", kind: "Hybrid", purpose: "Checks rules, routes human gates and locks approved packages.", runtime: "Rules engine + Claude Sonnet 5", model: "claude-sonnet-5", prompt_version: "p-2.2", guardrail: "Flags and blocks, never edits", autonomyLine: "May check, report, block, route, record and lock within policy. Zero authority over approval decisions or rule waivers." },
-  { key: "PK", name: "Packaging module", kind: "Deterministic", purpose: "Assembles the manifest: completeness, naming, hashes. No LLM.", runtime: "Execution Studio workflow engine", guardrail: "Packaging is transactional, partial manifests impossible", autonomyLine: "Deterministic module. Only content-confirmed assets with a human confirmation record can enter a package." },
+  { key: "PK", name: "Packaging module", kind: "Deterministic", purpose: "Assembles the manifest: completeness, naming, hashes. No LLM.", runtime: "Marketing Studio workflow engine", guardrail: "Packaging is transactional, partial manifests impossible", autonomyLine: "Deterministic module. Only content-confirmed assets with a human confirmation record can enter a package." },
 ];
 
 export const governance = {
@@ -60,6 +60,36 @@ export const journeySteps: { n: number; title: string; owner: string; agent: Age
 ];
 
 export const phaseLabels = ["Intake & planning", "Production & assembly", "Compliance & approval"];
+
+/* ---------- Campaign identity colors ----------
+   One tone per campaign, assigned deterministically from its id.
+   Palette is the validated chart set plus teal; identity only, never semantic. */
+
+export type CampaignTone = { accent: string; ink: string; soft: string; line: string };
+
+export const campaignTones: CampaignTone[] = [
+  { accent: "#456bb6", ink: "#34518d", soft: "#e9eff9", line: "#c8d6ef" },
+  { accent: "#047857", ink: "#065f46", soft: "#e2f3ec", line: "#b9dfcf" },
+  { accent: "#b45309", ink: "#8a4a06", soft: "#fbf0df", line: "#ecd9b8" },
+  { accent: "#db2777", ink: "#9d1f5a", soft: "#fbe9f2", line: "#f2c4da" },
+  { accent: "#0e7490", ink: "#155e75", soft: "#e2f2f7", line: "#bcdfe9" },
+];
+
+export function campaignTone(id: string, campaigns?: { id: string }[]): CampaignTone {
+  // Position in the workspace keeps the first five campaigns visually distinct;
+  // the hash fallback covers contexts without the campaign list.
+  const idx = campaigns?.findIndex((c) => c.id === id) ?? -1;
+  if (idx >= 0) return campaignTones[idx % campaignTones.length];
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return campaignTones[h % campaignTones.length];
+}
+
+/* CSS custom properties a component can spread onto style={} */
+export function toneVars(id: string, campaigns?: { id: string }[]): Record<string, string> {
+  const t = campaignTone(id, campaigns);
+  return { "--tone": t.accent, "--tone-ink": t.ink, "--tone-soft": t.soft, "--tone-line": t.line };
+}
 
 /* ---------- Helpers ---------- */
 
@@ -147,48 +177,80 @@ export function buildDoc(c: Pick<Campaign, "bu" | "vertical" | "topic">, assetNa
   switch (assetName) {
     case "LinkedIn company post": return { kicker, title: "What changes first, and what stays", body: [
       `Most ${c.vertical} teams we meet do not need another platform pitch. They need a clear view of which processes move first and why.`,
-      "Our new flagship article lays out that sequence: confirm the baseline, move the highest-friction processes, keep a governance rhythm the business can sustain.",
+      "That question rarely gets a straight answer. Vendors lead with capability lists, analysts lead with maturity models, and the team in the middle is left to guess at a sequence. The result is a programme that starts everywhere at once and lands nowhere in particular.",
+      "Our new flagship article lays out the sequence we actually run with clients: confirm the platform baseline first, move the highest-friction processes next, and keep a governance rhythm the business can sustain after the consultants leave.",
+      "The baseline matters because it removes the largest source of rework. In our delivery experience, programmes that skip it spend the second quarter re-litigating decisions the first quarter thought were settled.",
+      "Friction matters because it is measurable. The process your operations team complains about weekly is a better first move than the one that demos well, and the article shows how to score that honestly.",
+      "None of this requires a big-bang commitment. Each move is scoped to be reversible, evidenced and owned by a named person on your side.",
       "Read the practical path in the full article. Link in the first comment.",
     ] };
     case "Executive LinkedIn post": return { kicker, title: "The outcome case, before the implementation detail", body: [
       `Executives do not fund migrations; they fund outcomes. The strongest ${c.vertical} programmes we support start by naming the operating result they need, then sequence the platform work behind it.`,
-      "The evidence: teams that separate readiness, priority and change capacity reach a governed steady state in one quarter, not three.",
-      "The full article sets out the ninety-day sequence we use with clients today.",
+      "That ordering sounds obvious, but most business cases run the other way: they open with the platform decision and back into the benefits. Sponsors are then asked to underwrite technology risk without a clear statement of the operating change it buys.",
+      "The evidence from our client base is consistent. Teams that separate readiness, priority and change capacity reach a governed steady state in one quarter. Teams that treat those as one workstream take three, and spend the difference on rework.",
+      "There is also a cost argument that rarely gets made. A sequenced programme concentrates spend on the processes with proven friction, which means the first invoice maps to the first measurable relief rather than to groundwork the business cannot see.",
+      "The governance rhythm is the part most programmes skip: a weekly operational review and a monthly sponsor checkpoint, each with a named owner. It sounds light; it is what keeps the sequence honest once the initial energy fades.",
+      "The full article sets out the ninety-day sequence we use with clients today, including the baseline checklist and the scoring model for process friction.",
     ] };
     case "Email nurture snippet": return { kicker, title: "Subject: the first ninety days, mapped", body: [
-      "Most teams stall on sequencing rather than technology. Our new guide maps the first ninety days into three governed moves.",
-      "It is a ten-minute read with a one-page checklist your team can use as-is.",
+      "Most teams stall on sequencing rather than technology. The platform question gets answered in a workshop; the order-of-operations question follows the programme around for a year.",
+      "Our new guide maps the first ninety days into three governed moves: confirm the baseline, move the highest-friction process, set the review rhythm that keeps both honest.",
+      "Each move comes with the checklist we use in delivery: what evidence to collect, who signs it, and what has to be true before the next move starts.",
+      "It also names the two failure patterns we see most often, the everything-at-once programme and the pilot that never graduates, and shows the early signals of each.",
+      "It is a ten-minute read with a one-page checklist your team can use as-is, without a discovery call and without reformatting it for your steering pack.",
       "Get the guide from the link below, no form required.",
     ] };
     case "Sales battle card": return { kicker, title: "Talk track: lead with sequence, not features", body: [
-      "Opening position: LevelShift delivers a governed path, not a big-bang migration. Anchor on the three-move sequence from the flagship article.",
-      "Objection, \"we are not ready\": readiness is the first move, not a prerequisite. The baseline assessment confirms it in two weeks.",
-      "Proof point: every claim on this card traces to the confirmed claim inventory, sourced from LevelShift delivery experience.",
+      "Opening position: LevelShift delivers a governed path, not a big-bang migration. Anchor on the three-move sequence from the flagship article and keep the conversation on operating outcomes, not module comparisons.",
+      "Discovery questions that open the right conversation: which process generates the most weekly friction today; who owns the platform baseline; what happened to the last modernisation attempt and why did it stall.",
+      "Objection, \"we are not ready\": readiness is the first move, not a prerequisite. The baseline assessment confirms it in two weeks and produces the evidence pack the sponsor needs either way.",
+      "Objection, \"we already have a partner\": we are not asking them to switch, we are asking to run the baseline. The output is theirs to keep; the sequence sells itself or it does not.",
+      "Objection, \"the timing is wrong\": the sequence is built from reversible moves. The cost of starting the baseline now is two weeks of access; the cost of waiting is another quarter of the friction they already named.",
+      "Proof point: every claim on this card traces to the confirmed claim inventory, sourced from LevelShift delivery experience. If a prospect asks for the evidence behind any line, it exists and is citable.",
+      "Do not promise: custom integrations in phase one, migration dates before the baseline completes, or any outcome not present in the claim inventory.",
     ] };
     case "Executive one-pager": return { kicker, title: "The one-page view for executive sponsors", body: [
       "Purpose: give sponsors the whole programme on one page: the operating outcome, the three-move sequence and the governance rhythm that keeps it on track.",
+      "The outcome, stated plainly: a governed operating platform where the highest-friction processes have moved, the controls the business relies on are intact, and the team can evidence both.",
+      "Move one, confirm the baseline: two weeks, read-only access, a findings pack the sponsor keeps. This is where hidden dependencies and unowned processes surface, while they are still cheap to address.",
+      "Move two, sequence the friction: the processes scored highest for weekly operational drag move first. Each move is scoped to be reversible and carries a named business owner, not just a technical one.",
+      "Move three, set the rhythm: a weekly operational review and a monthly sponsor checkpoint. Thirty minutes each, standing agenda, decisions minuted with owners.",
       "Decision asked of the sponsor: confirm the baseline assessment and name the first process to move.",
       "Everything on this page traces to sourced claims; nothing is projected beyond the evidence.",
     ] };
     case "AEO / FAQ extract": return { kicker, title: "Questions buyers actually ask", body: [
-      "What moves first? The highest-friction process with the clearest owner, confirmed against the platform baseline.",
-      "How long until value? Teams typically reach a governed steady state within one quarter of the first move.",
-      "Who governs the change? A named rhythm: weekly operational review, monthly sponsor checkpoint.",
+      "What moves first? The highest-friction process with the clearest owner, confirmed against the platform baseline. Friction is scored from operational data, not stakeholder enthusiasm.",
+      "How long until value? Teams typically reach a governed steady state within one quarter of the first move. The first measurable relief usually lands inside the first six weeks, because the first move targets a process the team already tracks.",
+      "What does the baseline assessment involve? Two weeks, read-only access, and a findings pack covering platform readiness, process dependencies and control coverage. The pack belongs to the client regardless of what happens next.",
+      "Who governs the change? A named rhythm: weekly operational review, monthly sponsor checkpoint. Both have standing agendas and minuted decisions, so governance survives personnel changes.",
+      "What if we have already started with another approach? The baseline is additive. It either validates the current sequence or shows precisely where it drifts, and the evidence pack is useful in both cases.",
+      "What does it cost to find out? Two weeks of scoped access. There is no commitment to the later moves until the baseline evidence supports them.",
     ] };
     case "Community draft": return { kicker, title: "A sequence worth discussing", body: [
       "We are frequently asked how organisations should determine the sequencing of their modernisation initiatives. The considered answer involves separating platform readiness from process priority and change capacity.",
-      `Our latest flagship article presents a three-move framework validated across ${c.vertical} engagements.`,
-      "We would welcome the community's perspective on which process should move first and the reasoning behind it.",
+      "Those three factors get conflated constantly. Readiness is a property of the platform and its dependencies. Priority is a property of the business friction. Capacity is a property of the team asked to absorb the change. A programme plan that treats them as one number will be wrong in at least two directions.",
+      `Our latest flagship article presents a three-move framework validated across ${c.vertical} engagements: baseline first, friction-ranked moves second, governance rhythm throughout.`,
+      "The part that generates the most discussion is the friction scoring. We rank candidate processes by measured weekly drag rather than by strategic narrative, and the resulting order is often not the one the steering committee expected.",
+      "There is a fair counter-argument: sometimes the strategically loud process deserves to move first for reasons a friction score cannot see. We address that in the article with an explicit override step, which requires the sponsor to document the reasoning.",
+      "We would welcome the community's perspective on which process should move first and the reasoning behind it, particularly from teams that have run a sequence like this more than once.",
     ] };
     case "Service-page brief": return { kicker, title: "Service page: structure and message brief", body: [
-      "Hero: one clear promise, no feature list. Subhead names the three-move sequence.",
-      "Body sections: baseline assessment, sequencing workshop, governance rhythm. Each section carries one sourced proof point.",
-      "CTA: book the baseline assessment. Secondary: read the flagship article.",
+      "Hero: one clear promise, no feature list. Subhead names the three-move sequence. Primary action is booking the baseline assessment; nothing else competes with it above the fold.",
+      "Section one, baseline assessment: two weeks, read-only access, findings pack the client keeps. Proof point: baseline findings have redirected the first move in a majority of engagements, sourced from the claim inventory.",
+      "Section two, sequencing workshop: friction-scored process ranking with named owners per move. Proof point: the scoring model and an anonymised example ranking from a delivery engagement.",
+      "Section three, governance rhythm: the weekly operational review and monthly sponsor checkpoint, described as deliverables with standing agendas, not as ceremony.",
+      "Tone: evidence-led and specific. No superlatives, no unsourced statistics, no competitor naming. Every number on the page must trace to the claim inventory.",
+      "CTA: book the baseline assessment. Secondary: read the flagship article. No third action; the page has one job.",
     ] };
     default: return { kicker, title: c.topic.charAt(0).toUpperCase() + c.topic.slice(1), body: [
       `For ${c.vertical} leaders, this is not simply a technology decision. It is an opportunity to create a more responsive operating foundation while protecting the controls that matter.`,
-      "The most effective programmes begin by separating platform readiness, process priorities and change capacity. That creates a practical sequence teams can understand and govern.",
-      "Three moves matter in the first ninety days: confirm the baseline, sequence the highest-friction processes and set a governance rhythm the business can keep.",
+      "The pressure to move is real, and so is the cost of moving badly. Most organisations in this position have lived through at least one modernisation programme that promised transformation and delivered a longer backlog. The scepticism that leaves behind is rational, and any credible plan has to answer it with sequence and evidence rather than ambition.",
+      "The most effective programmes begin by separating platform readiness, process priorities and change capacity. Readiness is a property of the platform and its dependencies; priority is a property of the business friction; capacity is a property of the team absorbing the change. Treating them as one conversation produces plans that are wrong in ways nobody can quite name. Treating them separately creates a practical sequence teams can understand and govern.",
+      "Three moves matter in the first ninety days: confirm the platform baseline, sequence the highest-friction processes and set a governance rhythm the business can keep.",
+      "The baseline comes first because it is the cheapest place to be wrong. Two weeks of read-only assessment surfaces the undocumented dependencies, the processes with no clear owner and the controls that exist in policy but not in practice. Every one of those findings is inexpensive to address before the first move and expensive after it.",
+      "Sequencing by friction, rather than by strategy-deck prominence, is the second discipline. The process that costs the operations team hours every week is a better first move than the one with the best demo, because its improvement is felt immediately and measured easily. That early, visible relief is what buys the programme its second quarter.",
+      "The governance rhythm is deliberately unglamorous: a weekly operational review and a monthly sponsor checkpoint, each thirty minutes, each with a standing agenda and minuted decisions. Programmes rarely fail for lack of ambition; they fail when nobody notices the drift until it is a quarter wide. The rhythm is the drift detector.",
+      "None of this is theoretical. The sequence described here is the one LevelShift runs in delivery today, and every claim in this article traces to the confirmed claim inventory behind it. The practical starting point is a conversation about your baseline, and that conversation takes an hour, not a quarter.",
     ] };
   }
 }
@@ -199,7 +261,7 @@ export function reviseDoc(doc: DocContent, aspects: string[]): DocContent {
   let body = doc.body.slice();
   if (has("tone")) body[0] = "Here it is without the polish: most teams do not have a sequencing problem, they have a starting-point problem. Pick the highest-friction process, confirm the baseline, move.";
   if (has("audience")) body[0] = "For the practitioners here rather than the sponsors: this is the sequence we would actually run, in the order we would run it.";
-  if (has("length") && body.length > 2) body = [body[0], body[body.length - 1]];
+  if (has("length") && body.length > 3) body = [body[0], body[1], body[body.length - 1]];
   if (has("cta")) body[body.length - 1] = "One question for the comments: which process would you move first, and what is blocking it today?";
   if (has("fact")) body = [...body, "Every claim in this revision was re-checked against the confirmed claim inventory; no new claims were introduced."];
   return { ...doc, body };
@@ -410,8 +472,13 @@ export const flagshipDoc = {
   title: "Cloud momentum starts with a clear view of what changes and what stays",
   paragraphs: [
     "For Financial Services leaders, moving Business Central to the cloud is not simply an infrastructure decision. It is an opportunity to create a more responsive operating foundation while protecting the controls that matter.",
-    "The most effective programmes begin by separating platform readiness, process priorities and change capacity. This creates a practical sequence that teams can understand and govern.",
+    "The pressure to move is real, and so is the cost of moving badly. Most finance organisations have lived through at least one modernisation programme that promised transformation and delivered a longer backlog. Any credible cloud plan has to answer that scepticism with sequence and evidence rather than ambition.",
+    "The most effective programmes begin by separating platform readiness, process priorities and change capacity. Readiness is a property of the platform and its dependencies; priority is a property of the business friction; capacity is a property of the team absorbing the change. This creates a practical sequence that teams can understand and govern.",
     "Three moves matter in the first ninety days: confirm the platform baseline, sequence the highest-friction processes and set a governance rhythm the business can keep.",
+    "The baseline comes first because it is the cheapest place to be wrong. Two weeks of read-only assessment surfaces undocumented dependencies, processes with no clear owner and controls that exist in policy but not in practice, while every one of those findings is still inexpensive to address.",
+    "Sequencing by measured friction, rather than by strategy-deck prominence, is the second discipline. The reconciliation process that costs the finance team hours every close is a better first move than the module with the best demo, because its improvement is felt immediately and measured easily.",
+    "The governance rhythm is deliberately unglamorous: a weekly operational review and a monthly sponsor checkpoint, each with a standing agenda and minuted decisions. Programmes rarely fail for lack of ambition; they fail when nobody notices the drift until it is a quarter wide.",
+    "None of this is theoretical. The sequence described here is the one LevelShift runs in Financial Services delivery today, and every claim in this article traces to the confirmed claim inventory behind it.",
   ],
   source: "LevelShift BC delivery overview, p. 8",
 };
