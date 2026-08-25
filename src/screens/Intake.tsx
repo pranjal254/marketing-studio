@@ -3,6 +3,7 @@ import { PaperPlaneTilt } from "@phosphor-icons/react";
 import { useStore, type IntakeForm } from "../store";
 import { useNav } from "../nav";
 import { EventLine, MicButton, MiniSource, Monogram } from "../ui";
+import { InlineDots } from "../loaders";
 
 const channelOptions = ["LinkedIn", "Email nurture", "Sales enablement", "Web / service page", "Community", "Event"];
 
@@ -41,7 +42,7 @@ export default function IntakeScreen() {
         <section className="intake-result">
           <div className="activity-feed embedded">
             {events.map((e) => <EventLine event={e} key={e.id} />)}
-            {!routed && <p className="pending-line">Agent working…</p>}
+            {!routed && <p className="pending-line">Agent working<InlineDots /></p>}
           </div>
           {routed && (
             <div className="intake-routed">

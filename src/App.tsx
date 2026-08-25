@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Suspense, lazy, useContext, useEffect, useMemo, useRef, useState, useTransition, type ComponentType } from "react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import {
   ArrowClockwise, Bell, BellSlash, CaretDown, ChartLineUp, Checks, FlowArrow, House, ListChecks,
   MagnifyingGlass, Package, Question, Robot, SealCheck, SidebarSimple, SquaresFour,
@@ -7,18 +8,39 @@ import {
 import type { PageKey } from "./types";
 import { fullStamp, roleTypes, stampTime, toneVars } from "./data";
 import { StoreProvider, openTasksFor, useStore } from "./store";
-import { NavContext, useNav, type NavTarget } from "./nav";
+import { NavTransitionContext, useNav } from "./nav";
 import { Avatar, MicButton, Modal, Toast, TraceDrawer, useAutoCloseDetails } from "./ui";
-import HomeScreen from "./screens/Home";
-import IntakeScreen from "./screens/Intake";
-import CampaignsScreen from "./screens/Campaigns";
-import ApprovalsScreen from "./screens/Approvals";
-import LibraryScreen from "./screens/Library";
-import AgentsScreen from "./screens/Agents";
-import InsightsScreen from "./screens/Insights";
-import UsersScreen from "./screens/Users";
-import ActivityScreen from "./screens/Activity";
-import RolloutScreen from "./screens/Rollout";
+import { AppSplash, PageLoader } from "./loaders";
+
+/* Each screen is its own route-level chunk; the loader map doubles as the
+   prefetch registry so hovering a nav item warms the chunk before the click. */
+const screenLoaders: Record<PageKey, () => Promise<{ default: ComponentType }>> = {
+  home: () => import("./screens/Home"),
+  campaigns: () => import("./screens/Campaigns"),
+  agents: () => import("./screens/Agents"),
+  approvals: () => import("./screens/Approvals"),
+  library: () => import("./screens/Library"),
+  insights: () => import("./screens/Insights"),
+  activity: () => import("./screens/Activity"),
+  users: () => import("./screens/Users"),
+  intake: () => import("./screens/Intake"),
+  rollout: () => import("./screens/Rollout"),
+};
+
+const HomeScreen = lazy(screenLoaders.home);
+const CampaignsScreen = lazy(screenLoaders.campaigns);
+const AgentsScreen = lazy(screenLoaders.agents);
+const ApprovalsScreen = lazy(screenLoaders.approvals);
+const LibraryScreen = lazy(screenLoaders.library);
+const InsightsScreen = lazy(screenLoaders.insights);
+const ActivityScreen = lazy(screenLoaders.activity);
+const UsersScreen = lazy(screenLoaders.users);
+const IntakeScreen = lazy(screenLoaders.intake);
+const RolloutScreen = lazy(screenLoaders.rollout);
+
+function prefetch(page: PageKey) {
+  void screenLoaders[page]();
+}
 
 const navItems: { key: PageKey; label: string; icon: Icon }[] = [
   { key: "home", label: "Home", icon: House },
@@ -30,6 +52,12 @@ const navItems: { key: PageKey; label: string; icon: Icon }[] = [
   { key: "activity", label: "Activity", icon: ListChecks },
   { key: "users", label: "Users", icon: UsersThree },
 ];
+
+const pageTitles: Record<PageKey, string> = {
+  home: "Home", campaigns: "Campaigns", agents: "Agents", approvals: "Approvals",
+  library: "Package library", insights: "Insights", activity: "Activity",
+  users: "Users & roles", intake: "New campaign request", rollout: "Agent workflow",
+};
 
 function AskBar() {
   const { state, viewer } = useStore();
@@ -141,10 +169,31 @@ function NotificationsBell() {
   );
 }
 
+function NotFound() {
+  const { go } = useNav();
+  return (
+    <div className="screen-content not-found">
+      <p className="meta-label">404</p>
+      <h1>This page does not exist</h1>
+      <p>The address may be old or mistyped. Everything in the studio is reachable from the sidebar.</p>
+      <button className="primary-button" onClick={() => go("home")}>Back to home</button>
+    </div>
+  );
+}
+
+/* Mounts only once the first route chunk has resolved, flipping the Suspense
+   fallback from the branded splash to the lightweight in-page loader. */
+function BootMark({ onReady }: { onReady: () => void }) {
+  useEffect(() => { onReady(); }, [onReady]);
+  return null;
+}
 
 function Shell() {
   const { state, viewer, actions } = useStore();
   const { nav, go } = useNav();
+  const { pathname } = useLocation();
+  const routePending = useContext(NavTransitionContext)?.pending ?? false;
+  const [booted, setBooted] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("shiftai.sidebar") === "collapsed"; } catch { return false; }
   });
@@ -158,8 +207,17 @@ function Shell() {
   const openCount = openTasksFor(state, viewer.id).length;
   const activePage = nav.page;
 
+  useEffect(() => {
+    document.title = `${pageTitles[activePage]} · ShiftAI Marketing Studio`;
+  }, [activePage]);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   return (
     <main className={`app-shell${collapsed ? " is-collapsed" : ""}`}>
+      {routePending && <span className="route-progress" aria-hidden="true" />}
       <aside className="sidebar">
         <div className="sidebar-head">
           <button className="brand" onClick={() => go("home")}><span className="brand-mark"><img src="/logo-icon.svg" alt="ShiftAI" /></span><span className="brand-text"><strong>ShiftAI</strong><small>Marketing Studio</small></span></button>
@@ -171,14 +229,16 @@ function Shell() {
             const NavIcon = item.icon;
             const badge = item.key === "approvals" && openCount > 0 ? String(openCount) : undefined;
             return (
-              <button key={item.key} className={activePage === item.key ? "active" : ""} aria-current={activePage === item.key ? "page" : undefined} title={collapsed ? item.label : undefined} onClick={() => go(item.key)}>
+              <button key={item.key} className={activePage === item.key ? "active" : ""} aria-current={activePage === item.key ? "page" : undefined} title={collapsed ? item.label : undefined}
+                onMouseEnter={() => prefetch(item.key)} onFocus={() => prefetch(item.key)} onClick={() => go(item.key)}>
                 <span className="nav-icon"><NavIcon size={18} /></span><span className="nav-text">{item.label}</span>{badge && <em>{badge}</em>}
               </button>
             );
           })}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`rollout-link${activePage === "rollout" ? " active" : ""}`} title={collapsed ? "Agent workflow" : undefined} onClick={() => go("rollout")}><span className="nav-icon"><FlowArrow size={18} /></span><span className="nav-text">Agent workflow</span></button>
+          <button className={`rollout-link${activePage === "rollout" ? " active" : ""}`} title={collapsed ? "Agent workflow" : undefined}
+            onMouseEnter={() => prefetch("rollout")} onFocus={() => prefetch("rollout")} onClick={() => go("rollout")}><span className="nav-icon"><FlowArrow size={18} /></span><span className="nav-text">Agent workflow</span></button>
           <details className="menu profile-menu" ref={profileMenuRef}>
             <summary className="profile" title={collapsed ? viewer.name : undefined}>
               <Avatar initials={viewer.initials} />
@@ -205,16 +265,24 @@ function Shell() {
             <span className="role-chip" title={roleTypes.find((r) => r.name === viewer.role)?.gate}>{viewer.role}</span>
           </div>
         </header>
-        {activePage === "home" ? <HomeScreen />
-          : activePage === "rollout" ? <RolloutScreen />
-          : activePage === "campaigns" ? <CampaignsScreen />
-          : activePage === "agents" ? <AgentsScreen />
-          : activePage === "approvals" ? <ApprovalsScreen />
-          : activePage === "library" ? <LibraryScreen />
-          : activePage === "insights" ? <InsightsScreen />
-          : activePage === "users" ? <UsersScreen />
-          : activePage === "activity" ? <ActivityScreen />
-          : <IntakeScreen />}
+        <Suspense fallback={booted ? <PageLoader /> : <AppSplash />}>
+          <BootMark onReady={() => setBooted(true)} />
+          <Routes>
+            <Route path="/" element={<HomeScreen />} />
+            <Route path="/campaigns" element={<CampaignsScreen />} />
+            <Route path="/campaigns/:campaignId" element={<CampaignsScreen />} />
+            <Route path="/agents" element={<AgentsScreen />} />
+            <Route path="/approvals" element={<ApprovalsScreen />} />
+            <Route path="/approvals/:taskId" element={<ApprovalsScreen />} />
+            <Route path="/library" element={<LibraryScreen />} />
+            <Route path="/insights" element={<InsightsScreen />} />
+            <Route path="/activity" element={<ActivityScreen />} />
+            <Route path="/users" element={<UsersScreen />} />
+            <Route path="/intake" element={<IntakeScreen />} />
+            <Route path="/workflow" element={<RolloutScreen />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </section>
       <TraceDrawer />
       <Toast />
@@ -231,16 +299,13 @@ function Shell() {
 }
 
 export default function App() {
-  const [nav, setNav] = useState<NavTarget>({ page: "home" });
-  const api = useMemo(() => ({
-    nav,
-    go: (target: PageKey | NavTarget) => setNav(typeof target === "string" ? { page: target } : target),
-  }), [nav]);
+  const [pending, startTransition] = useTransition();
+  const transition = useMemo(() => ({ pending, start: (fn: () => void) => startTransition(fn) }), [pending]);
   return (
     <StoreProvider>
-      <NavContext.Provider value={api}>
+      <NavTransitionContext.Provider value={transition}>
         <Shell />
-      </NavContext.Provider>
+      </NavTransitionContext.Provider>
     </StoreProvider>
   );
 }

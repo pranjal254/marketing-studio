@@ -5,6 +5,7 @@ import { flagshipDoc, fullStamp, journeySteps, phaseLabels, stampTime, toneVars 
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
+import { InlineDots } from "../loaders";
 
 export default function CampaignsScreen() {
   const { state, now } = useStore();
@@ -93,7 +94,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
       <section className="campaign-summary-strip">
         <div><small>Journey progress</small><strong>{campaign.state === "approved_locked" ? "9 of 9 steps" : `${campaign.step} of 9 steps`}</strong><ProgressSteps active={campaign.state === "approved_locked" ? 9 : campaign.step - 1} /></div>
         <div><small>Content assets</small><strong>{assets.length === 0 ? "Not planned yet" : `${assets.length} registered`}</strong><span>{assets.length > 0 ? "1 flagship + 8 derivatives" : "Checklist arrives at step 3"}</span></div>
-        <div><small>Waiting on</small><strong>{openTasks.length === 0 ? "Agents executing" : personById(state, openTasks[0].assigneeId)?.name}</strong><span>{openTasks.length === 0 ? "No human gate open" : openTasks[0].title}</span></div>
+        <div><small>Waiting on</small><strong>{openTasks.length > 0 ? personById(state, openTasks[0].assigneeId)?.name : campaign.state === "approved_locked" ? "Nobody" : <>Agents executing<InlineDots /></>}</strong><span>{openTasks.length > 0 ? openTasks[0].title : campaign.state === "approved_locked" ? "Package locked read-only" : "No human gate open"}</span></div>
         <div><small>AI cost so far</small><strong>${cost.toFixed(2)}</strong><span>Within $6.00 envelope</span></div>
       </section>
       <div className="tab-bar" role="tablist">
