@@ -19,6 +19,7 @@ export type Person = {
 };
 
 export type CampaignState =
+  | "brief_draft"
   | "awaiting_input"
   | "brief_pending_approval"
   | "planning"
@@ -45,6 +46,9 @@ export type Campaign = {
   budgetApproved: boolean;
   state: CampaignState;
   step: number; // 1..9 journey position
+  request?: string; // the original ask the brief was drafted from (AI-first intake)
+  briefVersion?: string; // v0.x while in draft with the Marketing Lead
+  briefAngle?: "balanced" | "executive" | "practical";
 };
 
 export type AssetState = "planned" | "drafting" | "in_review" | "in_revision" | "content_confirmed" | "approved";

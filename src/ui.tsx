@@ -30,6 +30,7 @@ export function MiniSource({ children }: { children: ReactNode }) {
 }
 
 const campaignStateLabels: Record<CampaignState, { label: string; tone: "neutral" | "green" | "amber" | "blue" }> = {
+  brief_draft: { label: "Brief in draft", tone: "blue" },
   awaiting_input: { label: "Awaiting input", tone: "amber" },
   brief_pending_approval: { label: "Brief pending approval", tone: "amber" },
   planning: { label: "Planning", tone: "blue" },

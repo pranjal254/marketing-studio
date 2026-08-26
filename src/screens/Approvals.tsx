@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { CaretRight, Check, Clock, FileText, PaperPlaneTilt, Timer, Warning } from "@phosphor-icons/react";
 import { openTasksFor, personById, slaInfo, useStore } from "../store";
-import { fullStamp, stampTime } from "../data";
+import { briefFraming, fullStamp, stampTime } from "../data";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
-import type { Asset, Task } from "../types";
+import type { Asset, Campaign, Task } from "../types";
 import { DotsThree } from "@phosphor-icons/react";
 
 export default function ApprovalsScreen() {
@@ -46,9 +46,9 @@ export default function ApprovalsScreen() {
       {selected && <ChainPanel campaignId={selected.campaignId} />}
 
       <section className="sla-watch">
-        <div><h2>SLA watch</h2><p>Live from open review tasks. Reminders go out automatically at 50% and 90% of each SLA; persistent stalls escalate to the Marketing Lead.</p></div>
+        <div><h2>Turnaround watch</h2><p>Live from open review tasks. Reminders go out automatically at 50% and 90% of each review window; persistent stalls escalate to the Marketing Lead.</p></div>
         <div className="sla-rows">
-          {reviewWatch.length === 0 && <p className="sla-empty">No open reviews. New review tasks appear here with their SLA position.</p>}
+          {reviewWatch.length === 0 && <p className="sla-empty">No open reviews. New review tasks appear here with how much time remains.</p>}
           {reviewWatch.map((task) => {
             const info = slaInfo(task, now);
             const assignee = personById(state, task.assigneeId);
@@ -95,7 +95,7 @@ function TaskDetail({ task }: { task: Task }) {
   ];
 
   const copy: Record<string, { heading: string; body: string; cta: string; act: () => void }> = {
-    brief_approval: { heading: "Campaign brief", body: "The Campaign Identification Agent validated this brief: 9 of 9 required fields, no duplicates in the campaign calendar. Approving starts planning; nothing advances without this gate.", cta: "Approve brief", act: () => actions.approveBrief(task.id) },
+    brief_approval: { heading: "Campaign brief", body: "This is the complete brief: agent-drafted, verified by the Marketing Lead before it reached you, with its provenance and the original request below. Approving starts planning; nothing advances without this gate.", cta: "Approve brief", act: () => actions.approveBrief(task.id) },
     plan_confirm: { heading: "Audience & offer pack", body: "Campaign-in-a-Box proposed the audience pack, a 9-asset checklist and the workspace. The orchestrator never confirms its own output; your confirmation starts content drafting.", cta: "Confirm plan", act: () => actions.confirmPlan(task.id) },
     grammar_qa: { heading: "Final language QA", body: "All assets passed the automated gate (0 blocking findings). You are the final language gate on market-facing content; read any document below, then approve. Approval routes the package to BU sign-off.", cta: "Approve language QA", act: () => actions.grammarApprove(task.id) },
     package_signoff: { heading: "Package sign-off", body: "Every asset is content-confirmed with human identity recorded, 42 checks passed and Grammar QA is approved. Read any document below before you sign; signing off locks the package read-only in OneDrive.", cta: "Sign off & lock package", act: () => actions.signOffPackage(task.id) },
@@ -106,13 +106,72 @@ function TaskDetail({ task }: { task: Task }) {
     <section className="approval-detail">
       <div className="approval-detail-head"><div><div className="title-line"><h2>{task.title}</h2><CampaignStateChip state={campaign.state} /></div><p>{campaign.name} · {task.detail}</p></div></div>
       <div className="gap-body">
-        <div><p className="meta-label">{c.heading}</p><div className="brief-grid">{briefRows.map(([k, v]) => <div key={k}><small>{k}</small><strong>{v}</strong></div>)}</div></div>
+        {task.kind === "brief_approval"
+          ? <BriefReview campaign={campaign} />
+          : <div><p className="meta-label">{c.heading}</p><div className="brief-grid">{briefRows.map(([k, v]) => <div key={k}><small>{k}</small><strong>{v}</strong></div>)}</div></div>}
         {showAssets && <AssetListPanel campaignId={task.campaignId} onOpen={setDocAsset} />}
         <div className="agent-recommendation"><Monogram size="sm">{task.kind === "package_signoff" || task.kind === "grammar_qa" ? "QG" : task.kind === "plan_confirm" ? "CB" : "CI"}</Monogram><div><p className="meta-label">Why this is in front of you</p><p className="gate-why">{c.body}</p></div></div>
       </div>
       <DecisionFooter task={task} cta={c.cta} onDecide={c.act} allowReturn={task.kind === "brief_approval"} />
       {docAsset && <DocModal asset={docAsset} onClose={() => setDocAsset(null)} />}
     </section>
+  );
+}
+
+/* The full brief document as the approver sees it: agent framing, every field,
+   provenance (drafted, revised by directive, verified) and the original request. */
+function BriefReview({ campaign }: { campaign: Campaign }) {
+  const { state, now, openTrace } = useStore();
+  const events = state.events.filter((e) => e.campaignId === campaign.id);
+  const drafted = events.find((e) => e.activity === "draft_brief");
+  const validated = events.find((e) => e.activity === "validate_brief");
+  const revisions = events.filter((e) => e.activity === "revise_brief");
+  const finalised = [...events].reverse().find((e) => e.activity === "brief_finalised");
+  const verifier = finalised?.actor.personId ? personById(state, finalised.actor.personId) : undefined;
+  const provTrace = finalised ?? drafted ?? validated;
+  const requester = personById(state, campaign.requesterId);
+
+  const rows: [string, string][] = [
+    ["Objective", campaign.objective],
+    ["Offer or topic", campaign.topic],
+    ["Business unit", campaign.bu],
+    ["Vertical", campaign.vertical || "Not set"],
+    ["Target segment", campaign.segment || "Not set"],
+    ["Budget", campaign.budgetApproved ? "Approved" : "Not approved"],
+    ["Campaign window", campaign.window.start ? `${campaign.window.start} to ${campaign.window.end || "open"}` : "Not set"],
+    ["Campaign type", campaign.campaignType],
+    ["Channels", campaign.channels.join(" + ")],
+  ];
+
+  return (
+    <div className="brief-review">
+      <div className="brief-review-doc">
+        <p className="doc-kicker">{campaign.bu} · {campaign.vertical || "Vertical not set"}</p>
+        <h3 className="brief-review-title">{campaign.name}</h3>
+        <p className="brief-framing">{briefFraming(campaign)}</p>
+        <div className="brief-grid">
+          {rows.map(([k, v]) => <div key={k}><small>{k}</small><strong>{v}</strong></div>)}
+        </div>
+      </div>
+      <div className="brief-provenance">
+        <Monogram size="sm">CI</Monogram>
+        <div>
+          <strong>{drafted ? `Drafted by Campaign Identification from ${requester?.name.split(" ")[0] ?? "the requester"}'s request` : "Validated by Campaign Identification, 9 of 9 required fields"}</strong>
+          <small>
+            Brief {campaign.briefVersion ?? "v1.0"}
+            {revisions.length > 0 ? ` · ${revisions.length} revision${revisions.length > 1 ? "s" : ""} by Marketing Lead directive` : ""}
+            {verifier && finalised ? ` · verified and sent by ${verifier.name}, ${stampTime(finalised.ts, now)}` : ""}
+          </small>
+        </div>
+        {provTrace && <button className="trace-link" onClick={() => openTrace(provTrace.trace_id)}>Trace</button>}
+      </div>
+      {campaign.request && (
+        <div className="brief-request">
+          <small>Original request from {requester?.name ?? "the requester"}</small>
+          <p>"{campaign.request}"</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -152,19 +211,30 @@ function ReviewDetail({ task }: { task: Task }) {
       </div>
       <div className="decision-footer">
         {requesting && asset ? (
-          <form className="feedback-form" onSubmit={sendFeedback}>
-            <div><p className="meta-label">What should change? Your selection becomes the agent's revision instruction.</p>
+          <form className="directive-composer" onSubmit={sendFeedback}>
+            <div className="directive-head">
+              <Monogram size="sm">CR</Monogram>
+              <div>
+                <strong>Directive to Content Repurposing</strong>
+                <small>Routed as the agent's revision instruction on {asset.version} · recorded with your identity in the telemetry log</small>
+              </div>
+            </div>
+            <div>
+              <p className="meta-label">What should change?</p>
               <div className="aspect-row">
                 {FEEDBACK_ASPECTS.map((a) => (
                   <button type="button" key={a} className={`aspect-pill${aspects.includes(a) ? " active" : ""}`} aria-pressed={aspects.includes(a)} onClick={() => toggleAspect(a)}>{a}</button>
                 ))}
               </div>
             </div>
-            <div className="field"><label htmlFor="feedback-note">Note to the agent (optional, type or dictate)</label><div className="input-with-mic"><input id="feedback-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. opening reads too formal for this channel" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
+            <div className="field"><label htmlFor="feedback-note">Instruction (optional, type or dictate)</label><div className="input-with-mic"><input id="feedback-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. opening reads too formal for this channel" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
             {error && <p className="form-error" role="alert">{error}</p>}
-            <div className="feedback-actions">
-              <button type="submit" className="primary-button"><PaperPlaneTilt size={15} /> Send to agent</button>
-              <button type="button" className="text-button" onClick={() => { setRequesting(false); setError(""); }}>Cancel</button>
+            <div className="directive-foot">
+              <small>Sourced claims stay locked; the agent revises language, never evidence.</small>
+              <div className="feedback-actions">
+                <button type="button" className="text-button" onClick={() => { setRequesting(false); setError(""); }}>Cancel</button>
+                <button type="submit" className="primary-button"><PaperPlaneTilt size={15} /> Send directive</button>
+              </div>
             </div>
           </form>
         ) : (

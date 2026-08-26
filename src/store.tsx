@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useS
 import type {
   AppState, ApprovalRecord, Asset, Campaign, Notification, Person, Task, TelemetryEvent,
 } from "./types";
-import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor } from "./data";
+import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor, type DerivedBrief } from "./data";
 
 const STORAGE_KEY = "shiftai.demo.v3";
 
@@ -17,6 +17,7 @@ type Action =
   | { type: "EVENT"; event: TelemetryEvent }
   | { type: "CAMPAIGN_ADD"; campaign: Campaign }
   | { type: "CAMPAIGN_PATCH"; id: string; patch: Partial<Campaign> }
+  | { type: "CAMPAIGN_REMOVE"; id: string }
   | { type: "ASSETS_ADD"; assets: Asset[] }
   | { type: "ASSET_PATCH"; id: string; patch: Partial<Asset> }
   | { type: "TASK_ADD"; task: Task }
@@ -35,6 +36,15 @@ function reducer(state: AppState, action: Action): AppState {
     case "EVENT": return { ...state, events: [...state.events, action.event] };
     case "CAMPAIGN_ADD": return { ...state, campaigns: [...state.campaigns, action.campaign] };
     case "CAMPAIGN_PATCH": return { ...state, campaigns: state.campaigns.map((c) => c.id === action.id ? { ...c, ...action.patch } : c) };
+    case "CAMPAIGN_REMOVE": return {
+      ...state,
+      campaigns: state.campaigns.filter((c) => c.id !== action.id),
+      assets: state.assets.filter((a) => a.campaignId !== action.id),
+      tasks: state.tasks.filter((t) => t.campaignId !== action.id),
+      events: state.events.filter((e) => e.campaignId !== action.id),
+      notifications: state.notifications.filter((n) => n.campaignId !== action.id),
+      approvals: state.approvals.filter((a) => a.campaignId !== action.id),
+    };
     case "ASSETS_ADD": return { ...state, assets: [...state.assets, ...action.assets] };
     case "ASSET_PATCH": return { ...state, assets: state.assets.map((a) => a.id === action.id ? { ...a, ...action.patch } : a) };
     case "TASK_ADD": return { ...state, tasks: [...state.tasks, action.task] };
@@ -81,6 +91,11 @@ type Store = {
     setViewAs: (id: string) => void;
     markAllRead: () => void;
     submitRequest: (form: IntakeForm) => string;
+    draftBrief: (description: string, derived: DerivedBrief) => string;
+    reviseBrief: (campaignId: string, aspects: string[], note: string) => void;
+    updateBrief: (campaignId: string, patch: Partial<Campaign>) => void;
+    sendBrief: (campaignId: string) => void;
+    discardDraft: (campaignId: string) => void;
     answerGaps: (taskId: string, segment: string, budget: string) => void;
     approveBrief: (taskId: string) => void;
     returnBrief: (taskId: string, note: string) => void;
@@ -182,11 +197,72 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       later(700, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "duplicate_check", summary: "No duplicates or conflicts found in the campaign calendar", cost: 0.01, llm: 900, sources: ["Campaign calendar"] }));
       later(1400, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "classify_and_draft", summary: "Classified as demand generation, brief draft created in the campaign workspace", tokens: { input: 2400, output: 1100 }, cost: 0.03, llm: 4200, sources: ["Quarterly plan Q3"] }));
       later(2100, () => {
-        emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, SLA 2 business days", cost: 0 });
+        emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, due in 2 business days", cost: 0 });
         addTask({ kind: "brief_approval", campaignId: id, title: "Approve campaign brief", detail: `${form.topic} · brief v1.0 validated`, assigneeId: "marcus", slaHours: 48 });
         notify("marcus", `${form.topic} brief is ready for your approval`, id);
       });
       return id;
+    },
+
+    /* ---- AI-first intake: the agent drafts, the Marketing Lead verifies and iterates,
+       nothing is routed until sendBrief. ---- */
+
+    draftBrief: (description, derived) => {
+      const id = uid("c");
+      const trace = uid("tr");
+      const code = (derived.name.replace(/[^A-Za-z]/g, "").slice(0, 2) || "NC").toUpperCase();
+      const campaign: Campaign = {
+        id, code, name: derived.name, bu: derived.bu, vertical: derived.vertical,
+        campaignType: "Demand generation", objective: derived.objective, topic: derived.topic,
+        segment: "", channels: derived.channels, window: { start: "", end: "" },
+        requesterId: state.viewAsId, ownerId: state.viewAsId, budgetApproved: false,
+        state: "brief_draft", step: 1, request: description, briefVersion: "v0.1", briefAngle: "balanced",
+      };
+      dispatch({ type: "CAMPAIGN_ADD", campaign });
+      emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "parse_request", summary: "Request parsed: objective, vertical and channels extracted, gaps flagged for you", tokens: { input: 1900, output: 460 }, cost: 0.02, llm: 2600, sources: ["Your request", "Brief template v1.2"] });
+      later(700, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "duplicate_check", summary: "No duplicates or conflicts found in the campaign calendar", cost: 0.01, llm: 900, sources: ["Campaign calendar"] }));
+      later(1500, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "draft_brief", summary: "Brief v0.1 drafted for your review; nothing is routed until you send it", tokens: { input: 2400, output: 1150 }, cost: 0.03, llm: 4100, state: { previous: "request_received", current: "brief_draft", reason: "Marketing Lead reviews and iterates before anything moves" }, sources: ["Quarterly plan Q3"] }));
+      return id;
+    },
+
+    reviseBrief: (campaignId, aspects, note) => {
+      const campaign = state.campaigns.find((c) => c.id === campaignId);
+      if (!campaign) return;
+      const has = (a: string) => aspects.includes(a);
+      const patch: Partial<Campaign> = {};
+      if (has("Executive angle")) patch.briefAngle = "executive";
+      if (has("Practical angle")) patch.briefAngle = "practical";
+      if (has("Tighter objective")) patch.objective = campaign.objective.split(/[,;.]/)[0].trim();
+      if (has("Stronger offer") && !/concrete first step/.test(campaign.topic)) patch.topic = `${campaign.topic.replace(/…$/, "")}, with a concrete first step`;
+      const nextVersion = bumpVersion(campaign.briefVersion ?? "v0.1");
+      patch.briefVersion = nextVersion;
+      dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch });
+      emit({ ts: Date.now(), trace: uid("tr"), agent: "CI", campaignId, activity: "revise_brief", summary: `Brief revised to ${nextVersion} from your directive (${aspects.join(", ").toLowerCase()})`, tokens: { input: 2100, output: 640 }, cost: 0.03, llm: 2900, sources: ["Marketing Lead directive"], state: { previous: campaign.briefVersion ?? "v0.1", current: nextVersion, reason: note || aspects.join(", ") } });
+      showToast(`Brief revised to ${nextVersion}, still with you`);
+    },
+
+    updateBrief: (campaignId, patch) => {
+      dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch });
+    },
+
+    sendBrief: (campaignId) => {
+      const campaign = state.campaigns.find((c) => c.id === campaignId);
+      if (!campaign) return;
+      const trace = uid("tr");
+      const lead = state.people.find((p) => p.role === "BU Campaign Lead") ?? state.people[0];
+      dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch: { state: "brief_pending_approval" } });
+      emit({ ts: Date.now(), trace, agent: "studio", campaignId, activity: "brief_finalised", summary: `Brief ${campaign.briefVersion ?? "v0.1"} verified by ${viewer.name} and released for approval`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "brief_draft", current: "brief_pending_approval", reason: "Marketing Lead verified the agent draft and filled the fields agents never infer" } });
+      later(700, () => {
+        emit({ ts: Date.now(), trace, agent: "CI", campaignId, activity: "route_brief_approval", summary: `Brief approval routed to ${lead.name}, due in 2 business days`, cost: 0.01 });
+        addTask({ kind: "brief_approval", campaignId, title: "Approve campaign brief", detail: `Brief ${campaign.briefVersion ?? "v0.1"}, verified by ${viewer.name.split(" ")[0]} before routing`, assigneeId: lead.id, slaHours: 48 });
+        notify(lead.id, `${campaign.name} brief is ready for your approval`, campaignId);
+      });
+      showToast(`Brief sent to ${lead.name} for approval`);
+    },
+
+    discardDraft: (campaignId) => {
+      dispatch({ type: "CAMPAIGN_REMOVE", id: campaignId });
+      showToast("Draft discarded, nothing was routed");
     },
 
     answerGaps: (taskId, segment, budget) => {
@@ -197,7 +273,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "CAMPAIGN_PATCH", id: task.campaignId, patch: { segment, budgetApproved: budget === "Yes", state: "brief_pending_approval" } });
       emit({ ts: Date.now(), trace, agent: "CI", campaignId: task.campaignId, activity: "revalidate_brief", summary: "Gap answers received, brief re-validated with 9 of 9 fields", actor: { type: "human", personId: state.viewAsId }, cost: 0.02, llm: 2100, system: false, state: { previous: "awaiting_input", current: "brief_pending_approval", reason: "Requester supplied the missing fields" } });
       later(900, () => {
-        emit({ ts: Date.now(), trace, agent: "CI", campaignId: task.campaignId, activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, SLA 2 business days", cost: 0 });
+        emit({ ts: Date.now(), trace, agent: "CI", campaignId: task.campaignId, activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, due in 2 business days", cost: 0 });
         addTask({ kind: "brief_approval", campaignId: task.campaignId, title: "Approve campaign brief", detail: "Copilot Cloud Essentials · re-validated brief v1.1", assigneeId: "marcus", slaHours: 48 });
         notify("marcus", "Copilot Cloud Essentials brief re-validated and ready for approval", task.campaignId);
       });
@@ -381,7 +457,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         emit({ ts: Date.now(), trace: uid("tr"), agent: "QG", campaignId: task.campaignId, activity: "review_reassigned", summary: `${task.title} reassigned to ${person?.name ?? personId} by ${viewer.name}`, actor: { type: "human", personId: state.viewAsId }, system: false, cost: 0 });
         notify(personId, `${task.title} was reassigned to you`, task.campaignId);
       }
-      showToast(`Reassigned to ${person?.name ?? "reviewer"}, SLA restarted`);
+      showToast(`Reassigned to ${person?.name ?? "reviewer"}, turnaround clock restarted`);
     },
 
     nudgeTask: (taskId) => {
@@ -437,7 +513,7 @@ export function slaInfo(task: Task, now: number): { pct: number; remaining: stri
   const pct = Math.min(1.2, elapsed / total);
   const remainMs = Math.max(0, task.createdAt + total - now);
   const hours = Math.floor(remainMs / 3600000);
-  const remaining = remainMs === 0 ? "overdue" : hours >= 1 ? `${hours}h remaining` : `${Math.max(1, Math.round(remainMs / 60000))} min remaining`;
+  const remaining = remainMs === 0 ? "overdue" : hours >= 1 ? `due in ${hours}h` : `due in ${Math.max(1, Math.round(remainMs / 60000))} min`;
   const level = task.escalated ? "escalated" : pct >= 0.9 ? "at_risk" : "on_pace";
   return { pct, remaining, level };
 }

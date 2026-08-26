@@ -1,12 +1,17 @@
 import { useState, type ReactNode } from "react";
 import { ArrowRight, CalendarBlank, CaretRight, ListChecks, Package, Plus, Robot, SealCheck, SquaresFour } from "@phosphor-icons/react";
 import { computeKpis, campaignCost, openTasksFor, personById, slaInfo, useStore } from "../store";
-import { roleTypes, stampTime } from "../data";
+import { roleTypes, stampTime, toneVars } from "../data";
 import { useNav } from "../nav";
-import { Avatar, CampaignStateChip, Chip, EventLine, Modal, Monogram, ProgressSteps } from "../ui";
+import { CampaignStateChip, Chip, EventLine, Modal, Monogram, ProgressSteps } from "../ui";
 import type { Task } from "../types";
 
 const taskChipTone = (task: Task): "amber" | "blue" => (task.kind === "conflict" || task.kind === "gaps" ? "amber" : "blue");
+
+const kindLabels: Record<Task["kind"], string> = {
+  gaps: "Your input", conflict: "Decision", brief_approval: "Approval", plan_confirm: "Confirmation",
+  review: "Review", grammar_qa: "Language QA", package_signoff: "Sign-off",
+};
 
 type Tile = { key: string; label: string; value: string; sub: string; formula: string };
 
@@ -24,6 +29,20 @@ export default function HomeScreen() {
   const greeting = new Date(now).getHours() < 12 ? "Good morning" : new Date(now).getHours() < 17 ? "Good afternoon" : "Good evening";
   const dateLabel = new Date(now).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
 
+  // The studio reports on itself: agent work in the last 24h, widened to 7 days when quiet
+  let digestEvents = state.events.filter((e) => e.actor.type !== "human" && e.ts >= now - 24 * 3600000);
+  let digestWindow = "last 24 hours";
+  if (digestEvents.length === 0) {
+    digestEvents = state.events.filter((e) => e.actor.type !== "human" && e.ts >= now - 7 * 86400000);
+    digestWindow = "last 7 days";
+  }
+  const digest = {
+    count: digestEvents.length,
+    campaigns: new Set(digestEvents.map((e) => e.campaignId)).size,
+    cost: digestEvents.reduce((s, e) => s + e.cost_usd, 0),
+    escalations: digestEvents.filter((e) => e.outcome === "escalated").length,
+  };
+
   const orgTiles: Tile[] = [
     { key: "agent", label: "Agent-executed", value: `${kpis.agentExecutedPct}%`, sub: `${kpis.systemActivities} of ${kpis.totalActivities} activities`, formula: "System-executed telemetry activities divided by all activities in the event log. Reminder and escalation pings are excluded. Click any activity in the feed below to see its full trace." },
     { key: "firstpass", label: "First-pass approval", value: `${kpis.firstPassPct}%`, sub: `${kpis.gatePasses} of ${kpis.gateTotal} runs, no blocking findings`, formula: "Quality Gate compliance runs that finished with zero blocking findings, divided by all compliance runs in the log. Advisory findings do not count against precision." },
@@ -36,7 +55,7 @@ export default function HomeScreen() {
   const nextSla = myTasks[0] ? slaInfo(myTasks[0], now) : null;
   const personalTiles: Tile[] = [
     { key: "open", label: "Open for you", value: String(myTasks.length), sub: myTasks[0] ? myTasks[0].title : "Queue is clear", formula: "Open tasks in the shared queue where you are the assignee. Reassignments move a task out of this count immediately." },
-    { key: "due", label: "Next due", value: nextSla ? nextSla.remaining.replace(" remaining", "") : "None", sub: myTasks[0] ? `SLA ${myTasks[0].slaHours}h window` : "No SLA running against you", formula: "SLA countdown on your oldest open task: the task's SLA window minus the time since it was routed to you. Reminder pings go out at 50% and 90% of the window." },
+    { key: "due", label: "Next due", value: nextSla ? (nextSla.remaining === "overdue" ? "Overdue" : nextSla.remaining.replace("due in ", "")) : "None", sub: myTasks[0] ? `${myTasks[0].slaHours}h review window` : "No clock running against you", formula: "Countdown on your oldest open task: its review window minus the time since it was routed to you. Reminder pings go out at 50% and 90% of the window." },
     { key: "decisions", label: "Your decisions", value: String(myApprovals.length), sub: "Recorded in the approval chain", formula: "Approval-chain records where you are the recorded actor. Each carries the artifact version and content hash it applied to, so a decision can never silently apply to changed content." },
     { key: "touch", label: "Campaigns you touch", value: String(touched), sub: "Via tasks routed to you", formula: "Distinct campaigns that have routed at least one task to you, open or completed." },
   ];
@@ -94,6 +113,17 @@ export default function HomeScreen() {
         <div className="welcome-actions">{actions}</div>
       </section>
 
+      {digest.count > 0 && (
+        <section className="digest-strip" aria-label="Agent activity digest">
+          <span className="digest-dot" aria-hidden="true" />
+          <p>
+            Agents executed <strong>{digest.count} activities</strong> across {digest.campaigns} campaign{digest.campaigns === 1 ? "" : "s"} in the {digestWindow} ·
+            <strong> ${digest.cost.toFixed(2)}</strong> spent · {digest.escalations === 0 ? "nothing escalated" : `${digest.escalations} escalated to humans`}
+          </p>
+          <button className="text-link" onClick={() => go("activity")}>Review activity <ArrowRight size={12} /></button>
+        </section>
+      )}
+
       <section className="kpi-band" aria-label={tiles === orgTiles ? "Campaign KPIs" : "Your workload"}>
         {tiles.map((tile) => (
           <button className="kpi-tile" key={tile.key} onClick={() => setExplain(tile)} title="How is this computed?">
@@ -115,16 +145,23 @@ export default function HomeScreen() {
           {myTasks.length === 0 ? (
             <section className="empty-panel"><h3>Nothing needs you right now</h3><p>Agents are executing. New decisions will appear here and in your notifications.</p></section>
           ) : (
-            <section className="needs-grid">
-              {myTasks.slice(0, 2).map((task) => {
+            <section className="decision-list">
+              {myTasks.slice(0, 4).map((task) => {
                 const campaign = state.campaigns.find((c) => c.id === task.campaignId);
+                const sla = slaInfo(task, now);
+                const open = () => go({ page: "approvals", taskId: task.id });
                 return (
-                  <article className="need-card" key={task.id}>
-                    <div className="card-top"><Chip tone={taskChipTone(task)}>{task.kind === "gaps" ? "Awaiting your input" : task.kind === "conflict" ? "Due today" : "Decision"}</Chip><span className="card-age">{stampTime(task.createdAt, now)}</span></div>
-                    <div className="person-row"><Avatar initials={viewer.initials} /><div><p className="role-line">{viewer.role}</p><h3>{task.title}</h3></div></div>
-                    <p className="card-copy">{task.detail}</p>
-                    <div className="context-line">{campaign?.name}</div>
-                    <div className="card-footer"><CampaignStateChip state={campaign?.state ?? "planning"} /><button onClick={() => go({ page: "approvals", taskId: task.id })}>Open task</button></div>
+                  <article className="decision-row" key={task.id} style={campaign ? toneVars(campaign.id, state.campaigns) : undefined} role="button" tabIndex={0}
+                    onClick={open} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }}>
+                    <Chip tone={taskChipTone(task)}>{kindLabels[task.kind]}</Chip>
+                    <span className="decision-main">
+                      <strong>{task.title}</strong>
+                      <small>{task.detail}</small>
+                    </span>
+                    <span className="decision-campaign"><i className="line-dot" aria-hidden="true" />{campaign?.name}</span>
+                    {sla.level === "escalated" ? <Chip tone="red">Escalated</Chip> : sla.remaining === "overdue" ? <Chip tone="red">Overdue</Chip> : sla.level === "at_risk" ? <Chip tone="amber">{sla.remaining.replace("due in", "Due in")}</Chip> : <Chip tone="green">On pace</Chip>}
+                    <span className="decision-age">{stampTime(task.createdAt, now)}</span>
+                    <span className="row-arrow"><CaretRight size={14} /></span>
                   </article>
                 );
               })}
@@ -140,7 +177,7 @@ export default function HomeScreen() {
           const openTasks = state.tasks.filter((t) => t.campaignId === c.id && t.status === "open");
           const nextGate = openTasks[0] ? personById(state, openTasks[0].assigneeId)?.name : "Agents executing";
           return (
-            <article className="campaign-row" key={c.id} onClick={() => go({ page: "campaigns", campaignId: c.id })}>
+            <article className="campaign-row" key={c.id} style={toneVars(c.id, state.campaigns)} onClick={() => go({ page: "campaigns", campaignId: c.id })}>
               <Monogram>{c.code}</Monogram>
               <div className="campaign-main"><div className="title-line"><h3>{c.name}</h3><CampaignStateChip state={c.state} /></div><p>{c.vertical} · {c.campaignType}</p><ProgressSteps active={c.step - 1} /></div>
               <div className="campaign-stat"><small>Current step</small><strong>{["", "Intake", "Audience & offer", "Asset plan", "Drafting", "Review", "Packaging", "Compliance", "Grammar QA", "Sign-off"][c.step]}</strong><span>{c.step} of 9</span></div>

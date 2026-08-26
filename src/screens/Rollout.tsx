@@ -325,14 +325,14 @@ function NodeDetailPanel({ campaign, selectedId, gates, onOpenTrace, onGo, viewe
             <p className="wf-panel-copy">{info.task.title}: {info.task.detail}. Assigned {stampTime(info.task.createdAt, now)}{sla ? `, ${sla.remaining}` : ""}{info.task.escalated ? ", escalated" : ""}.</p>
             {info.task.assigneeId === viewerId
               ? <button className="primary-button" onClick={() => onGo({ page: "approvals", taskId: info.task!.id })}>Open your task <ArrowRight size={13} /></button>
-              : <p className="wf-panel-note">Only {person?.name.split(" ")[0]} can clear this gate. Agents wait; the SLA watch nudges automatically.</p>}
+              : <p className="wf-panel-note">Only {person?.name.split(" ")[0]} can clear this gate. Agents wait; the turnaround watch nudges automatically.</p>}
           </>
         )}
         {info.status === "done" && (
           <p className="wf-panel-copy">Cleared{person ? ` by ${person.name}` : ""}{info.approvalAt ? ` ${stampTime(info.approvalAt, now)}` : ""}{info.approvalHash ? <> · recorded with hash <code>{info.approvalHash}</code></> : ""}.</p>
         )}
         {info.status === "upcoming" && (
-          <p className="wf-panel-copy">Not reached yet. When the pipeline arrives here, the Quality Gate routes the decision to the {info.def.role} with a 2-business-day SLA.</p>
+          <p className="wf-panel-copy">Not reached yet. When the pipeline arrives here, the Quality Gate routes the decision to the {info.def.role} with a 2-business-day turnaround.</p>
         )}
       </aside>
     );

@@ -191,6 +191,56 @@ export function makeEvent(e: EvInput): TelemetryEvent {
   };
 }
 
+/* ---------- AI-first intake: deterministic brief derivation ----------
+   Stand-in for the Campaign Identification agent's request parsing. It extracts what
+   the description actually states and leaves the rest as explicit gaps; segment,
+   budget and dates are never inferred, they stay with the human. */
+
+export type DerivedBrief = {
+  name: string; objective: string; topic: string; bu: string; vertical: string; channels: string[];
+  derived: { vertical: boolean; channels: boolean };
+};
+
+export function deriveBrief(description: string): DerivedBrief {
+  const d = description.toLowerCase();
+  let vertical = "";
+  if (/(finserv|financial|bank|insur)/.test(d)) vertical = "Financial Services";
+  else if (/(manufactur|factory|plant|industrial)/.test(d)) vertical = "Manufacturing";
+  else if (/(tech|copilot|cloud|saas|software|ai )/.test(d)) vertical = "Technology";
+  let bu = "Business Central";
+  if (/(finance & operations|f&o|\bfno\b)/.test(d)) bu = "Finance & Operations";
+  else if (/cross[- ]bu/.test(d)) bu = "Cross-BU";
+  const channels: string[] = [];
+  if (/linkedin|social/.test(d)) channels.push("LinkedIn");
+  if (/email|nurture|newsletter/.test(d)) channels.push("Email nurture");
+  if (/sales|enablement|battle/.test(d)) channels.push("Sales enablement");
+  if (/\bweb\b|landing|service page|seo/.test(d)) channels.push("Web / service page");
+  if (/community|forum/.test(d)) channels.push("Community");
+  if (/event|webinar|roundtable|conference/.test(d)) channels.push("Event");
+  const firstSentence = (description.split(/[.!?]\s/)[0] ?? description).trim().replace(/[.!?]+$/, "");
+  const objective = firstSentence ? firstSentence.charAt(0).toUpperCase() + firstSentence.slice(1) : "New campaign";
+  const stop = new Set(["a", "an", "the", "for", "to", "in", "of", "our", "we", "and", "on", "with", "that", "build", "create", "drive", "launch", "campaign", "want", "need", "help", "is", "are"]);
+  const words = firstSentence.split(/\s+/).filter((w) => w && !stop.has(w.toLowerCase())).slice(0, 3)
+    .map((w) => { const c = w.replace(/[^\w&-]/g, ""); return c.charAt(0).toUpperCase() + c.slice(1); });
+  const name = words.length ? words.join(" ") : "New Campaign";
+  const topic = vertical ? `${name} for ${vertical}` : name;
+  return { name, objective, topic, bu, vertical, channels, derived: { vertical: vertical !== "", channels: channels.length > 0 } };
+}
+
+/* The agent's positioning paragraph on the draft brief; the angle is what directives flip */
+export function briefFraming(c: Pick<Campaign, "topic" | "vertical" | "briefAngle">): string {
+  const v = c.vertical || "the target vertical";
+  const t = c.topic.replace(/…$/, "").toLowerCase();
+  switch (c.briefAngle) {
+    case "executive":
+      return `Executives fund outcomes, not activity. This campaign positions "${t}" as an operating result for ${v} leaders: the business case leads, implementation detail follows in the supporting assets, and every claim will trace to the confirmed inventory.`;
+    case "practical":
+      return `Lead with the first practical step. This campaign gives ${v} teams a concrete starting point on "${t}", keeps the promise narrow and provable, and routes the deeper evidence through the flagship asset. Every claim will trace to the confirmed inventory.`;
+    default:
+      return `Position LevelShift on "${t}" for ${v}, grounded in delivery experience rather than category claims. The flagship asset carries the argument and the channel derivatives adapt it; every claim will trace to the confirmed inventory.`;
+  }
+}
+
 /* ---------- Document content (stand-in for the OneDrive workspace files) ---------- */
 
 export function buildDoc(c: Pick<Campaign, "bu" | "vertical" | "topic">, assetName: string): DocContent {
@@ -413,7 +463,7 @@ export function buildSeed(): AppState {
   push({ ts: d(2), agent: "PK", campaignId: "ai", activity: "assemble_manifest", summary: "Manifest assembled, 9 assets registered with hashes", state: { previous: "in_review", current: "packaged_pending_compliance", reason: "Completeness diff empty" } });
   push({ ts: h(34), agent: "QG", campaignId: "ai", activity: "compliance_pass", summary: "42 checks completed, 0 blocking, 1 advisory", tokens: { input: 9200, output: 1900 }, cost: 0.29, llm: 13000, outcome: "flagged", sources: ["Rules pack v3.2", "Brand guidelines"] });
   push({ ts: h(33), agent: "studio", campaignId: "ai", activity: "grammar_qa_approved", summary: "Final language QA approved by Tom Aldridge", actor: { type: "human", personId: "tom" }, state: { previous: "grammar_qa", current: "awaiting_signoff", reason: "Grammar / Quality Reviewer approval recorded" }, system: false });
-  push({ ts: h(26), agent: "QG", campaignId: "ai", activity: "route_signoff", summary: "Package sign-off routed to Sofia Reyes, SLA 2 business days", cost: 0.01 });
+  push({ ts: h(26), agent: "QG", campaignId: "ai", activity: "route_signoff", summary: "Package sign-off routed to Sofia Reyes, due in 2 business days", cost: 0.01 });
 
   // BC Cloud Momentum (mid-flight)
   push({ ts: d(13), agent: "CI", campaignId: "bc", activity: "validate_brief", summary: "Brief validated, no duplicates in campaign calendar", tokens: { input: 3300, output: 920 }, cost: 0.05, llm: 4300, sources: ["Intake form", "Quarterly plan Q3"] });
@@ -427,7 +477,7 @@ export function buildSeed(): AppState {
   push({ ts: d(2), agent: "CO", campaignId: "bc", activity: "stage_reviews", summary: "Review tasks created for 4 reviewers with document links", cost: 0.06, llm: 2400 });
   push({ ts: h(31), agent: "CO", campaignId: "bc", activity: "consolidate_reviews", summary: "14 comments consolidated into 8 tracked edits", tokens: { input: 12100, output: 3900 }, cost: 0.4, llm: 23000, sources: ["Word comments", "Workflow plan v1.4"] });
   push({ ts: h(30), agent: "CO", campaignId: "bc", activity: "conflict_escalation", summary: "Conflicting feedback on executive post surfaced to Marketing Lead", assetId: "bc-a2", outcome: "escalated", cost: 0.02, llm: 1800, state: { previous: "in_review", current: "in_revision", reason: "Reviewer conflict requires human adjudication" }, sources: ["Feedback round 2"] });
-  push({ ts: h(4), agent: "QG", campaignId: "bc", activity: "sla_reminder", summary: "Second reminder sent, community draft review at 90% of SLA", cost: 0 });
+  push({ ts: h(4), agent: "QG", campaignId: "bc", activity: "sla_reminder", summary: "Second reminder sent, community draft review at 90% of its window", cost: 0 });
   push({ ts: m(8), agent: "QG", campaignId: "bc", activity: "sla_escalation", summary: "Executive one-pager review stalled 1d 4h, escalated with blocking reviewer named", outcome: "escalated", cost: 0 });
 
   // Copilot Cloud Essentials (awaiting input)
@@ -436,7 +486,7 @@ export function buildSeed(): AppState {
 
   // FinServ Executive Event (brief pending)
   push({ ts: h(21), agent: "CI", campaignId: "fe", activity: "validate_brief", summary: "Brief validated, 9 of 9 fields, classified as event campaign", tokens: { input: 3000, output: 800 }, cost: 0.05, llm: 4000, sources: ["Intake form", "Event calendar"] });
-  push({ ts: h(20), agent: "CI", campaignId: "fe", activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, SLA 2 business days", cost: 0.01 });
+  push({ ts: h(20), agent: "CI", campaignId: "fe", activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, due in 2 business days", cost: 0.01 });
 
   const approvals: ApprovalRecord[] = [
     { id: "ap1", campaignId: "w1", action: "Brief approved", byId: "sofia", role: "BU Campaign Lead", at: d(45), version: "v1.0", hash: fakeHash("w1-brief") },
@@ -459,7 +509,7 @@ export function buildSeed(): AppState {
     { id: "n3", ts: d(3), personId: "rishi", text: "Campaign Identification needs 2 answers on your Copilot Cloud Essentials request", campaignId: "cce", read: false },
     { id: "n4", ts: h(20), personId: "marcus", text: "FinServ Executive Event brief is ready for your approval", campaignId: "fe", read: false },
     { id: "n5", ts: h(26), personId: "sofia", text: "AI Readiness package passed all checks and awaits your sign-off", campaignId: "ai", read: false },
-    { id: "n6", ts: h(22), personId: "jen", text: "Reminder: community draft review at 90% of SLA", campaignId: "bc", read: false },
+    { id: "n6", ts: h(22), personId: "jen", text: "Reminder: community draft review at 90% of its window", campaignId: "bc", read: false },
   ];
 
   return {

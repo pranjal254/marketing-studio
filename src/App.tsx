@@ -1,16 +1,17 @@
 import { Suspense, lazy, useContext, useEffect, useMemo, useRef, useState, useTransition, type ComponentType } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import {
-  ArrowClockwise, Bell, BellSlash, CaretDown, ChartLineUp, Checks, FlowArrow, House, ListChecks,
-  MagnifyingGlass, Package, Question, Robot, SealCheck, SidebarSimple, SquaresFour,
-  UsersThree, type Icon,
+  ArrowClockwise, Bell, BellSlash, CaretDown, ChartLineUp, Checks, CurrencyDollar, FlowArrow,
+  HourglassMedium, House, ListChecks, MagnifyingGlass, Package, Question, Robot, SealCheck,
+  SidebarSimple, SquaresFour, UsersThree, Warning, type Icon,
 } from "@phosphor-icons/react";
-import type { PageKey } from "./types";
+import type { AppState, PageKey, Person } from "./types";
 import { fullStamp, roleTypes, stampTime, toneVars } from "./data";
-import { StoreProvider, openTasksFor, useStore } from "./store";
-import { NavTransitionContext, useNav } from "./nav";
-import { Avatar, MicButton, Modal, Toast, TraceDrawer, useAutoCloseDetails } from "./ui";
+import { StoreProvider, campaignCost, costByAgent, openTasksFor, slaInfo, personById, useStore } from "./store";
+import { NavTransitionContext, useNav, type NavTarget } from "./nav";
+import { Avatar, MicButton, Modal, Toast, TraceDrawer, agentName, useAutoCloseDetails } from "./ui";
 import { AppSplash, PageLoader } from "./loaders";
+import { ContextPanel } from "./panel";
 
 /* Each screen is its own route-level chunk; the loader map doubles as the
    prefetch registry so hovering a nav item warms the chunk before the click. */
@@ -59,8 +60,65 @@ const pageTitles: Record<PageKey, string> = {
   users: "Users & roles", intake: "New campaign request", rollout: "Agent workflow",
 };
 
+/* ---- Ask/act intents: deterministic answers over live state, rendered as cited cards.
+   The bar answers and routes; it never clears a gate. ---- */
+
+type AnswerRow = { key: string; primary: string; secondary?: string; value?: string; target?: PageKey | NavTarget };
+type AnswerCard = { key: string; icon: Icon; title: string; note: string; rows: AnswerRow[] };
+
+const ASK_SUGGESTIONS = ["campaign costs", "what is stalled", "open gates", "agent fleet"];
+
+function buildAnswers(q: string, state: AppState, viewer: Person, now: number): AnswerCard[] {
+  const cards: AnswerCard[] = [];
+  const openTasks = state.tasks.filter((t) => t.status === "open");
+
+  if (/cost|spend|budget|\$|expensive/.test(q)) {
+    const rows = state.campaigns
+      .map((c) => ({ c, cost: campaignCost(state, c.id) }))
+      .filter((x) => x.cost > 0)
+      .sort((a, b) => b.cost - a.cost)
+      .map(({ c, cost }): AnswerRow => ({ key: c.id, primary: c.name, secondary: c.state === "approved_locked" ? "Locked" : `Step ${c.step} of 9`, value: `$${cost.toFixed(2)}`, target: { page: "campaigns", campaignId: c.id } }));
+    cards.push({ key: "cost", icon: CurrencyDollar, title: "AI cost by campaign", note: `Live from ${state.events.length} telemetry events`, rows });
+  }
+
+  if (/stall|overdue|escalat|block|late|risk|stuck/.test(q)) {
+    const rows = openTasks
+      .map((t) => ({ t, sla: slaInfo(t, now) }))
+      .filter((x) => x.sla.level !== "on_pace" || x.sla.remaining === "overdue")
+      .sort((a, b) => b.sla.pct - a.sla.pct)
+      .map(({ t, sla }): AnswerRow => ({
+        key: t.id, primary: t.title,
+        secondary: `${state.campaigns.find((c) => c.id === t.campaignId)?.name} · ${personById(state, t.assigneeId)?.name}`,
+        value: sla.level === "escalated" ? "Escalated" : sla.remaining === "overdue" ? "Overdue" : sla.remaining.replace("due in", "Due in"),
+        target: t.assigneeId === viewer.id ? { page: "approvals", taskId: t.id } : "approvals",
+      }));
+    cards.push({ key: "stalled", icon: Warning, title: "At risk or stalled", note: "Open gates past 90% of their review window, or escalated", rows });
+  }
+
+  if (/wait|gate|who|pending|approvals? open|blocking/.test(q)) {
+    const rows = openTasks.map((t): AnswerRow => ({
+      key: t.id, primary: state.campaigns.find((c) => c.id === t.campaignId)?.name ?? "Campaign",
+      secondary: t.title, value: personById(state, t.assigneeId)?.name.split(" ")[0],
+      target: t.assigneeId === viewer.id ? { page: "approvals", taskId: t.id } : "approvals",
+    }));
+    cards.push({ key: "gates", icon: HourglassMedium, title: "Open human gates", note: "Every open decision and who holds it", rows });
+  }
+
+  if (/agent|fleet|autonomy|runs?\b/.test(q)) {
+    const runCount = new Map<string, number>();
+    state.events.forEach((e) => runCount.set(e.agent, (runCount.get(e.agent) ?? 0) + 1));
+    const rows = costByAgent(state).slice(0, 5).map(({ agent, cost }): AnswerRow => ({
+      key: agent, primary: agentName(agent as Parameters<typeof agentName>[0]),
+      secondary: `${runCount.get(agent) ?? 0} runs`, value: `$${cost.toFixed(2)}`, target: "agents",
+    }));
+    cards.push({ key: "fleet", icon: Robot, title: "Agent fleet", note: "Runs and cost from the event log", rows });
+  }
+
+  return cards;
+}
+
 function AskBar() {
-  const { state, viewer } = useStore();
+  const { state, now, viewer } = useStore();
   const { go } = useNav();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -77,32 +135,61 @@ function AskBar() {
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const answers = q ? buildAnswers(q, state, viewer, now) : [];
     const campaigns = state.campaigns.filter((c) => q && c.name.toLowerCase().includes(q));
     const tasks = openTasksFor(state, viewer.id).filter((t) => !q || t.title.toLowerCase().includes(q) || q.includes("task") || q.includes("approv"));
-    return { campaigns, tasks };
-  }, [query, state, viewer.id]);
+    return { answers, campaigns, tasks };
+  }, [query, state, viewer, now]);
+
+  function pick(target?: PageKey | NavTarget) {
+    if (target) go(target);
+    setOpen(false);
+    setQuery("");
+  }
 
   return (
     <div className="ask-wrap">
       <div className={`ask-bar as-input${open ? " open" : ""}`}>
         <MagnifyingGlass size={16} />
-        <input ref={inputRef} value={query} placeholder="Search campaigns and your tasks…" aria-label="Search campaigns and tasks"
+        <input ref={inputRef} value={query} placeholder="Ask the studio or search…" aria-label="Ask the studio or search campaigns and tasks"
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} />
         <MicButton onText={(t) => { setQuery(t); setOpen(true); inputRef.current?.focus(); }} />
         <kbd>⌘K</kbd>
       </div>
       {open && (
         <div className="ask-popover">
+          {!query.trim() && (
+            <div className="ask-suggest">
+              {ASK_SUGGESTIONS.map((s) => (
+                <button key={s} onMouseDown={(e) => { e.preventDefault(); setQuery(s); inputRef.current?.focus(); }}>{s}</button>
+              ))}
+            </div>
+          )}
+          {results.answers.map((card) => {
+            const CardIcon = card.icon;
+            return (
+              <div className="ask-answer" key={card.key}>
+                <div className="ask-answer-head"><CardIcon size={14} /><strong>{card.title}</strong><small>{card.note}</small></div>
+                {card.rows.length === 0 && <p className="ask-empty">Nothing matches right now, which is the honest answer.</p>}
+                {card.rows.slice(0, 5).map((r) => (
+                  <button key={r.key} className="ask-answer-row" onMouseDown={() => pick(r.target)}>
+                    <span><strong>{r.primary}</strong>{r.secondary && <small>{r.secondary}</small>}</span>
+                    {r.value && <em>{r.value}</em>}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
           {results.campaigns.length > 0 && <p className="meta-label">Campaigns</p>}
           {results.campaigns.map((c) => (
-            <button className="ask-result" key={c.id} onMouseDown={() => { go({ page: "campaigns", campaignId: c.id }); setOpen(false); setQuery(""); }}>
+            <button className="ask-result" key={c.id} onMouseDown={() => pick({ page: "campaigns", campaignId: c.id })}>
               <strong>{c.name}</strong><small>Step {c.step} of 9 · {c.state.replace(/_/g, " ")}</small>
             </button>
           ))}
           <p className="meta-label">{query.trim() ? "Your matching tasks" : "Your open tasks"}</p>
           {results.tasks.length === 0 && <p className="ask-empty">Nothing open for {viewer.name.split(" ")[0]}.</p>}
           {results.tasks.slice(0, 4).map((t) => (
-            <button className="ask-result" key={t.id} onMouseDown={() => { go({ page: "approvals", taskId: t.id }); setOpen(false); setQuery(""); }}>
+            <button className="ask-result" key={t.id} onMouseDown={() => pick({ page: "approvals", taskId: t.id })}>
               <strong>{t.title}</strong><small>{state.campaigns.find((c) => c.id === t.campaignId)?.name}</small>
             </button>
           ))}
@@ -197,7 +284,13 @@ function Shell() {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("shiftai.sidebar") === "collapsed"; } catch { return false; }
   });
+  const [ctxOpen, setCtxOpen] = useState(() => {
+    try { return localStorage.getItem("shiftai.ctxpanel") === "open"; } catch { return false; }
+  });
   const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => {
+    try { localStorage.setItem("shiftai.ctxpanel", ctxOpen ? "open" : "closed"); } catch { /* unavailable */ }
+  }, [ctxOpen]);
   const profileMenuRef = useRef<HTMLDetailsElement>(null);
   useAutoCloseDetails(profileMenuRef);
   useEffect(() => {
@@ -216,7 +309,7 @@ function Shell() {
   }, [pathname]);
 
   return (
-    <main className={`app-shell${collapsed ? " is-collapsed" : ""}`}>
+    <main className={`app-shell${collapsed ? " is-collapsed" : ""}${ctxOpen ? " panel-open" : ""}`}>
       {routePending && <span className="route-progress" aria-hidden="true" />}
       <aside className="sidebar">
         <div className="sidebar-head">
@@ -262,6 +355,7 @@ function Shell() {
           <div className="top-actions">
             <button className="help-button" aria-label="How this demo works" title="How this demo works" onClick={() => setHelpOpen(true)}><Question size={17} /></button>
             <NotificationsBell />
+            <button className={`ctx-toggle${ctxOpen ? " active" : ""}`} aria-pressed={ctxOpen} aria-label={ctxOpen ? "Close context panel" : "Open context panel"} title="Context panel" onClick={() => setCtxOpen(!ctxOpen)}><SidebarSimple size={17} className="flip-x" /></button>
             <span className="role-chip" title={roleTypes.find((r) => r.name === viewer.role)?.gate}>{viewer.role}</span>
           </div>
         </header>
@@ -284,6 +378,7 @@ function Shell() {
           </Routes>
         </Suspense>
       </section>
+      {ctxOpen && <ContextPanel onClose={() => setCtxOpen(false)} />}
       <TraceDrawer />
       <Toast />
       {helpOpen && (

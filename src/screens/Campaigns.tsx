@@ -146,7 +146,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
       {tab === "plan" && (
         <div className="plan-view">
           <section className="brief-card">
-            <div className="panel-heading"><div><p className="meta-label">Brief · {campaign.state === "awaiting_input" ? "awaiting input" : campaign.step > 1 ? "approved" : "pending approval"}</p><h2>{campaign.objective}</h2></div>{campaign.step > 1 && <Chip tone="green">Approved by {personById(state, state.approvals.find((a) => a.campaignId === campaign.id && a.action === "Brief approved")?.byId ?? "marcus")?.name}</Chip>}</div>
+            <div className="panel-heading"><div><p className="meta-label">Brief · {campaign.state === "brief_draft" ? "in draft with Marketing" : campaign.state === "awaiting_input" ? "awaiting input" : campaign.step > 1 ? "approved" : "pending approval"}</p><h2>{campaign.objective}</h2></div>{campaign.step > 1 && <Chip tone="green">Approved by {personById(state, state.approvals.find((a) => a.campaignId === campaign.id && a.action === "Brief approved")?.byId ?? "marcus")?.name}</Chip>}</div>
             <div className="brief-grid">
               <div><small>Business unit</small><strong>{campaign.bu}</strong></div>
               <div><small>Vertical</small><strong>{campaign.vertical}</strong></div>
@@ -157,6 +157,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
             </div>
             <div className="proof-box"><FileText size={18} /><div><strong>Offer framing</strong><p>{campaign.topic}. Grounded in LevelShift delivery experience; every claim traces to a verified source.</p></div></div>
             <div className="source-row"><MiniSource>Quarterly plan Q3</MiniSource><MiniSource>SemRush</MiniSource><MiniSource>Brand guidelines</MiniSource></div>
+            {campaign.request && <p className="brief-origin">Drafted by Campaign Identification from {personById(state, campaign.requesterId)?.name.split(" ")[0]}'s request: "{campaign.request}"</p>}
           </section>
           <section className="asset-plan-card">
             <div className="panel-heading"><div><p className="meta-label">Reuse before create</p><h2>Asset checklist</h2></div><span className="small-link">{assets.length || "0"} registered</span></div>
@@ -176,10 +177,11 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
 
       {tab === "content" && flagship && flagship.versions.length > 0 && (() => {
         const fdoc = flagship.versions[flagship.versions.length - 1].doc;
+        const flagshipTask = state.tasks.find((t) => t.assetId === flagship.id && t.status === "open" && t.assigneeId === viewer.id);
         return (
         <div className="content-view">
           <section className="flagship-panel">
-            <div className="doc-toolbar"><div><span className="file-icon lg"><FileText size={16} /></span><div><strong>{fdoc.title.slice(0, 44)}…</strong><small>Flagship article {flagship.version} · <AssetStateChip state={flagship.state} /></small></div></div><button onClick={() => setDocAsset(flagship)}>Open document <ArrowUpRight size={13} /></button></div>
+            <div className="doc-toolbar"><div><span className="file-icon lg"><FileText size={16} /></span><div><strong>{fdoc.title.slice(0, 44)}…</strong><small>Flagship article {flagship.version} · <AssetStateChip state={flagship.state} /></small></div></div><div className="doc-toolbar-actions">{flagshipTask && <button className="iterate-link" onClick={() => go({ page: "approvals", taskId: flagshipTask.id })}>Review &amp; iterate <ArrowRight size={13} /></button>}<button onClick={() => setDocAsset(flagship)}>Open document <ArrowUpRight size={13} /></button></div></div>
             <div className="document-preview">
               <p className="doc-kicker">{fdoc.kicker}</p>
               <h2>{fdoc.title}</h2>
@@ -217,7 +219,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
 
 function stepActivityMatch(step: number, activity: string): boolean {
   const map: Record<number, string[]> = {
-    1: ["validate_brief", "duplicate_check", "classify_and_draft", "route_brief_approval", "revalidate_brief", "brief_approved", "brief_returned"],
+    1: ["validate_brief", "duplicate_check", "classify_and_draft", "route_brief_approval", "revalidate_brief", "brief_approved", "brief_returned", "parse_request", "draft_brief", "revise_brief", "brief_finalised"],
     2: ["pull_intel", "plan_campaign"],
     3: ["plan_campaign", "plan_confirmed", "reuse_scan"],
     4: ["draft_flagship", "flagship_confirmed", "fan_out"],
