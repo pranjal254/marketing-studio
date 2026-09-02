@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CaretRight, Check, Clock, FileText, PaperPlaneTilt, Timer, Warning } from "@phosphor-icons/react";
 import { openTasksFor, personById, slaInfo, useStore } from "../store";
 import { briefFraming, fullStamp, stampTime } from "../data";
+import { liveApi } from "../live";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
 import type { Asset, Campaign, Task } from "../types";
@@ -80,13 +81,42 @@ export default function ApprovalsScreen() {
 }
 
 function TaskDetail({ task }: { task: Task }) {
-  const { state, actions } = useStore();
+  const { state, actions, viewer, showToast } = useStore();
   const campaign = state.campaigns.find((c) => c.id === task.campaignId)!;
   const [docAsset, setDocAsset] = useState<Asset | null>(null);
+  const [deciding, setDeciding] = useState(false);
 
   if (task.kind === "conflict") return <ConflictDetail task={task} />;
   if (task.kind === "gaps") return <GapsDetail task={task} />;
   if (task.kind === "review") return <ReviewDetail task={task} />;
+
+  /* A brief backed by a REAL agent case: the decision goes through the bridge first
+     (identity-stamped human gate in the agent), then the demo journey continues. */
+  async function approveLive() {
+    if (deciding) return;
+    setDeciding(true);
+    try {
+      if (task.liveCaseId) await liveApi.decide(task.liveCaseId, "approved", viewer.email);
+      actions.approveBrief(task.id);
+    } catch (e) {
+      showToast(`Live agent gate refused: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setDeciding(false);
+    }
+  }
+
+  async function returnLive(note: string) {
+    if (deciding) return;
+    setDeciding(true);
+    try {
+      if (task.liveCaseId) await liveApi.decide(task.liveCaseId, "returned", viewer.email, note);
+      actions.returnBrief(task.id, note);
+    } catch (e) {
+      showToast(`Live agent gate refused: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setDeciding(false);
+    }
+  }
 
   const briefRows = [
     ["Objective", campaign.objective], ["Business unit", campaign.bu], ["Vertical", campaign.vertical],
@@ -95,7 +125,7 @@ function TaskDetail({ task }: { task: Task }) {
   ];
 
   const copy: Record<string, { heading: string; body: string; cta: string; act: () => void }> = {
-    brief_approval: { heading: "Campaign brief", body: "This is the complete brief: agent-drafted, verified by the Marketing Lead before it reached you, with its provenance and the original request below. Approving starts planning; nothing advances without this gate.", cta: "Approve brief", act: () => actions.approveBrief(task.id) },
+    brief_approval: { heading: "Campaign brief", body: task.liveCaseId ? "This brief was drafted and routed by the LIVE Campaign Identification agent. Your decision is recorded by the agent itself (identity + timestamp) before the journey continues; nothing advances without this gate." : "This is the complete brief: agent-drafted, verified by the Marketing Lead before it reached you, with its provenance and the original request below. Approving starts planning; nothing advances without this gate.", cta: "Approve brief", act: () => void approveLive() },
     plan_confirm: { heading: "Audience & offer pack", body: "Campaign-in-a-Box proposed the audience pack, a 9-asset checklist and the workspace. The orchestrator never confirms its own output; your confirmation starts content drafting.", cta: "Confirm plan", act: () => actions.confirmPlan(task.id) },
     grammar_qa: { heading: "Final language QA", body: "All assets passed the automated gate (0 blocking findings). You are the final language gate on market-facing content; read any document below, then approve. Approval routes the package to BU sign-off.", cta: "Approve language QA", act: () => actions.grammarApprove(task.id) },
     package_signoff: { heading: "Package sign-off", body: "Every asset is content-confirmed with human identity recorded, 42 checks passed and Grammar QA is approved. Read any document below before you sign; signing off locks the package read-only in OneDrive.", cta: "Sign off & lock package", act: () => actions.signOffPackage(task.id) },
@@ -112,7 +142,13 @@ function TaskDetail({ task }: { task: Task }) {
         {showAssets && <AssetListPanel campaignId={task.campaignId} onOpen={setDocAsset} />}
         <div className="agent-recommendation"><Monogram size="sm">{task.kind === "package_signoff" || task.kind === "grammar_qa" ? "QG" : task.kind === "plan_confirm" ? "CB" : "CI"}</Monogram><div><p className="meta-label">Why this is in front of you</p><p className="gate-why">{c.body}</p></div></div>
       </div>
-      <DecisionFooter task={task} cta={c.cta} onDecide={c.act} allowReturn={task.kind === "brief_approval"} />
+      <DecisionFooter
+        task={task}
+        cta={deciding ? "Recording…" : c.cta}
+        onDecide={c.act}
+        allowReturn={task.kind === "brief_approval"}
+        onReturn={task.kind === "brief_approval" ? (note) => void returnLive(note) : undefined}
+      />
       {docAsset && <DocModal asset={docAsset} onClose={() => setDocAsset(null)} />}
     </section>
   );
@@ -270,14 +306,15 @@ function AssetListPanel({ campaignId, onOpen }: { campaignId: string; onOpen: (a
   );
 }
 
-function DecisionFooter({ task, cta, onDecide, allowReturn }: { task: Task; cta: string; onDecide: () => void; allowReturn?: boolean }) {
+function DecisionFooter({ task, cta, onDecide, allowReturn, onReturn }: { task: Task; cta: string; onDecide: () => void; allowReturn?: boolean; onReturn?: (note: string) => void }) {
   const { actions } = useStore();
   const [returning, setReturning] = useState(false);
   const [note, setNote] = useState("");
+  const submitReturn = (text: string) => (onReturn ? onReturn(text) : actions.returnBrief(task.id, text));
   return (
     <div className="decision-footer">
       {returning ? (
-        <form className="return-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (note.trim()) { actions.returnBrief(task.id, note.trim()); } }}>
+        <form className="return-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (note.trim()) { submitReturn(note.trim()); } }}>
           <div className="field"><label htmlFor="return-note">Note to the requester (type or dictate)</label><div className="input-with-mic"><input id="return-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What needs to change before approval?" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
           <button type="submit" className="secondary-button" disabled={!note.trim()}>Send back</button>
           <button type="button" className="text-button" onClick={() => setReturning(false)}>Cancel</button>

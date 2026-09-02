@@ -1,9 +1,9 @@
 import { Suspense, lazy, useContext, useEffect, useMemo, useRef, useState, useTransition, type ComponentType } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import {
-  ArrowClockwise, Bell, BellSlash, CaretDown, ChartLineUp, Checks, CurrencyDollar, FlowArrow,
-  HourglassMedium, House, ListChecks, MagnifyingGlass, Package, Question, Robot, SealCheck,
-  SidebarSimple, SquaresFour, UsersThree, Warning, type Icon,
+  ArrowClockwise, Bell, BellSlash, Broadcast, CaretDown, ChartLineUp, Checks, CurrencyDollar,
+  FlowArrow, HourglassMedium, House, ListChecks, MagnifyingGlass, Package, Question, Robot,
+  SealCheck, SidebarSimple, SquaresFour, UsersThree, Warning, type Icon,
 } from "@phosphor-icons/react";
 import type { AppState, PageKey, Person } from "./types";
 import { fullStamp, roleTypes, stampTime, toneVars } from "./data";
@@ -26,6 +26,7 @@ const screenLoaders: Record<PageKey, () => Promise<{ default: ComponentType }>> 
   users: () => import("./screens/Users"),
   intake: () => import("./screens/Intake"),
   rollout: () => import("./screens/Rollout"),
+  live: () => import("./screens/Live"),
 };
 
 const HomeScreen = lazy(screenLoaders.home);
@@ -38,6 +39,7 @@ const ActivityScreen = lazy(screenLoaders.activity);
 const UsersScreen = lazy(screenLoaders.users);
 const IntakeScreen = lazy(screenLoaders.intake);
 const RolloutScreen = lazy(screenLoaders.rollout);
+const LiveScreen = lazy(screenLoaders.live);
 
 function prefetch(page: PageKey) {
   void screenLoaders[page]();
@@ -51,6 +53,7 @@ const navItems: { key: PageKey; label: string; icon: Icon }[] = [
   { key: "library", label: "Package library", icon: Package },
   { key: "insights", label: "Insights", icon: ChartLineUp },
   { key: "activity", label: "Activity", icon: ListChecks },
+  { key: "live", label: "Live agents", icon: Broadcast },
   { key: "users", label: "Users", icon: UsersThree },
 ];
 
@@ -58,6 +61,7 @@ const pageTitles: Record<PageKey, string> = {
   home: "Home", campaigns: "Campaigns", agents: "Agents", approvals: "Approvals",
   library: "Package library", insights: "Insights", activity: "Activity",
   users: "Users & roles", intake: "New campaign request", rollout: "Agent workflow",
+  live: "Live agents",
 };
 
 /* ---- Ask/act intents: deterministic answers over live state, rendered as cited cards.
@@ -374,6 +378,7 @@ function Shell() {
             <Route path="/users" element={<UsersScreen />} />
             <Route path="/intake" element={<IntakeScreen />} />
             <Route path="/workflow" element={<RolloutScreen />} />
+            <Route path="/live" element={<LiveScreen />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

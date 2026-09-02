@@ -1,6 +1,6 @@
 export type PageKey =
   | "home" | "rollout" | "campaigns" | "agents" | "approvals"
-  | "library" | "insights" | "users" | "intake" | "activity";
+  | "library" | "insights" | "users" | "intake" | "activity" | "live";
 
 export type Role =
   | "Marketing Lead" | "BU Campaign Lead" | "Content Writer"
@@ -49,6 +49,7 @@ export type Campaign = {
   request?: string; // the original ask the brief was drafted from (AI-first intake)
   briefVersion?: string; // v0.x while in draft with the Marketing Lead
   briefAngle?: "balanced" | "executive" | "practical";
+  liveCaseId?: string; // set when this campaign is backed by a REAL agent case (bridge)
 };
 
 export type AssetState = "planned" | "drafting" | "in_review" | "in_revision" | "content_confirmed" | "approved";
@@ -99,6 +100,8 @@ export type Task = {
   escalated: boolean;
   status: "open" | "done";
   resolution?: { decision: string; byId: string; at: number; note?: string };
+  liveCaseId?: string; // brief_approval tasks backed by a REAL agent case route the
+  // decision through the bridge before the demo journey continues
 };
 
 // ShiftAI Telemetry Standard (STS) v1.1 event envelope

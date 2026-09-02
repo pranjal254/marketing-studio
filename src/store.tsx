@@ -78,6 +78,16 @@ export type IntakeForm = {
   owner: string; start: string; end: string; channels: string[]; budget: boolean;
 };
 
+/* An approved-for-routing brief coming from the REAL agent (bridge): mirrored into
+   the demo store so the rest of the studio journey continues (real step 1,
+   simulated steps 2–9 until agents 2–5 are built). */
+export type MirrorLiveBrief = {
+  caseId: string; name: string; objective: string; topic: string; bu: string;
+  vertical: string; segment: string; channels: string[];
+  window: { start: string; end: string }; budgetApproved: boolean;
+  request: string; briefVersion: string;
+};
+
 type Store = {
   state: AppState;
   now: number;
@@ -91,6 +101,7 @@ type Store = {
     setViewAs: (id: string) => void;
     markAllRead: () => void;
     submitRequest: (form: IntakeForm) => string;
+    mirrorLiveBrief: (input: MirrorLiveBrief) => void;
     draftBrief: (description: string, derived: DerivedBrief) => string;
     reviseBrief: (campaignId: string, aspects: string[], note: string) => void;
     updateBrief: (campaignId: string, patch: Partial<Campaign>) => void;
@@ -202,6 +213,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         notify("marcus", `${form.topic} brief is ready for your approval`, id);
       });
       return id;
+    },
+
+    mirrorLiveBrief: (input) => {
+      const lead = state.people.find((p) => p.role === "BU Campaign Lead") ?? state.people[0];
+      const trace = uid("tr");
+      const existing = state.campaigns.find((c) => c.id === input.caseId);
+      const campaign: Campaign = {
+        id: input.caseId,
+        code: (input.name.replace(/[^A-Za-z]/g, "").slice(0, 2) || "LC").toUpperCase(),
+        name: input.name, bu: input.bu, vertical: input.vertical,
+        campaignType: "Demand generation", objective: input.objective, topic: input.topic,
+        segment: input.segment, channels: input.channels, window: input.window,
+        requesterId: state.viewAsId, ownerId: state.viewAsId,
+        budgetApproved: input.budgetApproved, state: "brief_pending_approval", step: 1,
+        request: input.request, briefVersion: input.briefVersion, liveCaseId: input.caseId,
+      };
+      if (existing) dispatch({ type: "CAMPAIGN_PATCH", id: input.caseId, patch: { ...campaign } });
+      else dispatch({ type: "CAMPAIGN_ADD", campaign });
+      emit({ ts: Date.now(), trace, agent: "CI", campaignId: input.caseId, activity: "draft_brief", summary: `Brief ${input.briefVersion} drafted by the live Campaign Identification agent (see Live agents for the full STS trace)`, cost: 0, sources: ["Live agent case " + input.caseId] });
+      emit({ ts: Date.now(), trace, agent: "CI", campaignId: input.caseId, activity: "route_brief_approval", summary: `Brief approval routed to ${lead.name}, due in 2 business days`, cost: 0, sources: ["Live agent case " + input.caseId] });
+      const hasOpenTask = state.tasks.some(
+        (t) => t.campaignId === input.caseId && t.kind === "brief_approval" && t.status === "open",
+      );
+      if (!hasOpenTask) {
+        addTask({
+          kind: "brief_approval", campaignId: input.caseId, title: "Approve campaign brief",
+          detail: `${input.name} · brief ${input.briefVersion} drafted by the live agent, verified by ${viewer.name.split(" ")[0]}`,
+          assigneeId: lead.id, slaHours: 48, liveCaseId: input.caseId,
+        });
+        notify(lead.id, `${input.name} brief (live agent) is ready for your approval`, input.caseId);
+      }
     },
 
     /* ---- AI-first intake: the agent drafts, the Marketing Lead verifies and iterates,
