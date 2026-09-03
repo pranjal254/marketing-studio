@@ -294,10 +294,13 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   }, [campaign.liveCampaignId]);
 
   useEffect(() => {
+    // No polling for a campaign the bridge no longer knows (restart wiped its
+    // session) — the GoneNote replaces the panel and the loop must stop with it.
+    if (gone) return;
     void reloadRp();
     const timer = window.setInterval(() => void reloadRp(), 12000);
     return () => window.clearInterval(timer);
-  }, [reloadRp]);
+  }, [reloadRp, gone]);
 
   async function run(action: string, fn: () => Promise<unknown>, done: string) {
     if (busy || !campaign.liveCampaignId) return;
