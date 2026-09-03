@@ -3,11 +3,12 @@ import type {
   Notification, Person, Role, Task, TelemetryEvent,
 } from "./types";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /* ---------- People ---------- */
 
 export const seedPeople: Person[] = [
+  { id: "aicoe", name: "AiCoE Admin", initials: "AI", role: "AiCoE Admin", email: "aicoe@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "rishi", name: "Rishi Patel", initials: "RP", role: "Marketing Lead", email: "rishi.patel@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "marcus", name: "Marcus Webb", initials: "MW", role: "BU Campaign Lead", email: "marcus.webb@levelshift.com", status: "Active", lastActive: "1 hour ago" },
   { id: "sofia", name: "Sofia Reyes", initials: "SR", role: "BU Campaign Lead", email: "sofia.reyes@levelshift.com", status: "Active", lastActive: "Yesterday" },

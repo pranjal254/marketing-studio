@@ -76,14 +76,14 @@ export default function HomeScreen() {
     tiles = personalTiles;
     actions = (<>
       <button className="primary-button" onClick={() => go("approvals")}><SealCheck size={16} weight="bold" /> Open your reviews{myTasks.length > 0 ? ` (${myTasks.length})` : ""}</button>
-      <button className="outline-button" onClick={() => go("library")}><Package size={16} /> Package library</button>
+      <button className="outline-button" onClick={() => go("campaigns")}><SquaresFour size={16} /> Your campaigns</button>
     </>);
   } else if (role === "Grammar / Quality Reviewer") {
     lede = "Final language QA routed to you after the automated compliance checks.";
     tiles = personalTiles;
     actions = (<>
       <button className="primary-button" onClick={() => go("approvals")}><SealCheck size={16} weight="bold" /> Open QA queue{myTasks.length > 0 ? ` (${myTasks.length})` : ""}</button>
-      <button className="outline-button" onClick={() => go("activity")}><ListChecks size={16} /> Activity log</button>
+      <button className="outline-button" onClick={() => go("campaigns")}><SquaresFour size={16} /> Your campaigns</button>
     </>);
   } else if (role === "AiCoE Admin") {
     lede = "Fleet health, guardrails and cost across the agent estate. You govern agents, not campaign content.";

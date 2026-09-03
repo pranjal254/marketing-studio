@@ -4,6 +4,9 @@ import type {
 } from "./types";
 import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor, type DerivedBrief } from "./data";
 import { buildBoxSync, liveApi, type BoxSyncInput } from "./live";
+import { DEFAULT_PASSWORD, isAdmin } from "./access";
+
+const AUTH_KEY = "shiftai.auth";
 
 const STORAGE_KEY = "shiftai.demo.v3";
 
@@ -172,6 +175,11 @@ type Store = {
   state: AppState;
   now: number;
   viewer: Person;
+  /** The signed-in account (null → show the login screen). `viewer` can differ
+      only when an AiCoE Admin uses view-as. */
+  authed: Person | null;
+  login: (email: string, password: string) => string | null;
+  logout: () => void;
   toast: string | null;
   showToast: (text: string) => void;
   traceId: string | null;
@@ -201,6 +209,7 @@ type Store = {
     reassignTask: (taskId: string, personId: string) => void;
     nudgeTask: (taskId: string) => void;
     addUser: (name: string, email: string, role: Person["role"]) => void;
+    updateUser: (id: string, patch: { name?: string; email?: string; role?: Person["role"] }) => void;
     removeUser: (id: string) => void;
   };
 };
@@ -267,7 +276,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "APPROVAL_ADD", approval });
   }
 
-  const viewer = state.people.find((p) => p.id === state.viewAsId) ?? state.people[0];
+  /* ---- Lightweight auth (SSO replaces this in production) ---- */
+  const [authedId, setAuthedId] = useState<string | null>(() => {
+    try { return localStorage.getItem(AUTH_KEY); } catch { return null; }
+  });
+  const authed = authedId ? state.people.find((p) => p.id === authedId) ?? null : null;
+
+  function login(email: string, password: string): string | null {
+    const person = state.people.find(
+      (p) => p.email.toLowerCase() === email.trim().toLowerCase(),
+    );
+    if (!person) return "No workspace account for that email — ask AiCoE to add you (Users page).";
+    if (password !== DEFAULT_PASSWORD) return "Incorrect password. AiCoE shares the default password with every account.";
+    if (person.status === "Invited") {
+      dispatch({ type: "PERSON_PATCH", id: person.id, patch: { status: "Active", lastActive: "Now" } });
+    }
+    try { localStorage.setItem(AUTH_KEY, person.id); } catch { /* unavailable */ }
+    setAuthedId(person.id);
+    dispatch({ type: "VIEWAS", id: person.id });
+    return null;
+  }
+
+  function logout() {
+    try { localStorage.removeItem(AUTH_KEY); } catch { /* unavailable */ }
+    setAuthedId(null);
+  }
+
+  /* Non-admins always act as themselves; view-as is an admin-only instrument. */
+  const viewAsPerson = state.people.find((p) => p.id === state.viewAsId);
+  const viewer = authed
+    ? (isAdmin(authed.role) ? viewAsPerson ?? authed : authed)
+    : viewAsPerson ?? state.people[0];
 
   const actions: Store["actions"] = {
     reset: () => { dispatch({ type: "RESET" }); showToast("Demo data reset to the starting point"); },
@@ -710,6 +749,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       showToast(`Invite sent to ${name}`);
     },
 
+    updateUser: (id, patch) => {
+      const person = state.people.find((p) => p.id === id);
+      if (!person) return;
+      const next: Partial<Person> = { ...patch };
+      if (patch.name) next.initials = initialsOf(patch.name);
+      dispatch({ type: "PERSON_PATCH", id, patch: next });
+      showToast(`${patch.name ?? person.name}'s details updated`);
+    },
+
     removeUser: (id) => {
       const person = state.people.find((p) => p.id === id);
       dispatch({ type: "PERSON_REMOVE", id });
@@ -766,9 +814,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [state.campaigns, state.tasks]);
 
   const store = useMemo<Store>(() => ({
-    state, now, viewer, toast, showToast, traceId, openTrace: setTraceId, actions,
+    state, now, viewer, authed, login, logout, toast, showToast, traceId, openTrace: setTraceId, actions,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [state, now, toast, traceId]);
+  }), [state, now, toast, traceId, authedId]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }

@@ -3,7 +3,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import {
   ArrowClockwise, Bell, BellSlash, Broadcast, CaretDown, ChartLineUp, Checks, CurrencyDollar,
   FlowArrow, HourglassMedium, House, ListChecks, MagnifyingGlass, Package, Question, Robot,
-  SealCheck, SidebarSimple, SquaresFour, UsersThree, Warning, type Icon,
+  SealCheck, SidebarSimple, SignOut, SquaresFour, UsersThree, Warning, type Icon,
 } from "@phosphor-icons/react";
 import type { AppState, PageKey, Person } from "./types";
 import { fullStamp, roleTypes, stampTime, toneVars } from "./data";
@@ -12,6 +12,8 @@ import { NavTransitionContext, useNav, type NavTarget } from "./nav";
 import { Avatar, MicButton, Modal, Toast, TraceDrawer, agentName, useAutoCloseDetails } from "./ui";
 import { AppSplash, PageLoader } from "./loaders";
 import { ContextPanel } from "./panel";
+import { canAccess, isAdmin } from "./access";
+import LoginScreen from "./Login";
 
 /* Each screen is its own route-level chunk; the loader map doubles as the
    prefetch registry so hovering a nav item warms the chunk before the click. */
@@ -279,8 +281,21 @@ function BootMark({ onReady }: { onReady: () => void }) {
   return null;
 }
 
+function RoleGate() {
+  const { viewer } = useStore();
+  const { go } = useNav();
+  return (
+    <div className="screen-content not-found">
+      <p className="meta-label">Not part of your workspace</p>
+      <h1>This area isn't shown to {viewer.role}s</h1>
+      <p>The studio shows each role only the surfaces where they act — approvals you own, campaigns you work on. AiCoE manages access on the Users page.</p>
+      <button className="primary-button" onClick={() => go("home")}>Back to home</button>
+    </div>
+  );
+}
+
 function Shell() {
-  const { state, viewer, actions } = useStore();
+  const { state, viewer, authed, logout, actions } = useStore();
   const { nav, go } = useNav();
   const { pathname } = useLocation();
   const routePending = useContext(NavTransitionContext)?.pending ?? false;
@@ -312,6 +327,10 @@ function Shell() {
     window.scrollTo(0, 0);
   }, [pathname]);
 
+  if (!authed) return <LoginScreen />;
+  const visibleNav = navItems.filter((item) => canAccess(viewer.role, item.key));
+  const pageAllowed = canAccess(viewer.role, activePage);
+
   return (
     <main className={`app-shell${collapsed ? " is-collapsed" : ""}${ctxOpen ? " panel-open" : ""}`}>
       {routePending && <span className="route-progress" aria-hidden="true" />}
@@ -322,7 +341,7 @@ function Shell() {
         </div>
         <nav aria-label="Primary navigation">
           <p className="nav-label">Workspace</p>
-          {navItems.map((item) => {
+          {visibleNav.map((item) => {
             const NavIcon = item.icon;
             const badge = item.key === "approvals" && openCount > 0 ? String(openCount) : undefined;
             return (
@@ -334,21 +353,29 @@ function Shell() {
           })}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`rollout-link${activePage === "rollout" ? " active" : ""}`} title={collapsed ? "Agent workflow" : undefined}
-            onMouseEnter={() => prefetch("rollout")} onFocus={() => prefetch("rollout")} onClick={() => go("rollout")}><span className="nav-icon"><FlowArrow size={18} /></span><span className="nav-text">Agent workflow</span></button>
+          {canAccess(viewer.role, "rollout") && (
+            <button className={`rollout-link${activePage === "rollout" ? " active" : ""}`} title={collapsed ? "Agent workflow" : undefined}
+              onMouseEnter={() => prefetch("rollout")} onFocus={() => prefetch("rollout")} onClick={() => go("rollout")}><span className="nav-icon"><FlowArrow size={18} /></span><span className="nav-text">Agent workflow</span></button>
+          )}
           <details className="menu profile-menu" ref={profileMenuRef}>
             <summary className="profile" title={collapsed ? viewer.name : undefined}>
               <Avatar initials={viewer.initials} />
-              <span className="profile-text"><strong>{viewer.name}</strong><small>{viewer.role}</small></span>
+              <span className="profile-text"><strong>{viewer.name}</strong><small>{viewer.id !== authed.id ? `viewing as · signed in: ${authed.name.split(" ")[0]}` : viewer.role}</small></span>
               <CaretDown size={14} />
             </summary>
             <div className="menu-list up" onClick={(e) => ((e.currentTarget.parentElement as HTMLDetailsElement).open = false)}>
-              <p className="menu-label">View workspace as</p>
-              {state.people.filter((p) => p.status === "Active").map((p) => (
-                <button key={p.id} onClick={() => actions.setViewAs(p.id)} disabled={p.id === viewer.id}>{p.name} · {p.role}{p.id === viewer.id ? " (current)" : ""}</button>
-              ))}
-              <div className="menu-sep" />
-              <button onClick={() => actions.reset()}><ArrowClockwise size={14} /> Reset demo data</button>
+              {isAdmin(authed.role) && (
+                <>
+                  <p className="menu-label">View workspace as (admin)</p>
+                  {state.people.filter((p) => p.status === "Active").map((p) => (
+                    <button key={p.id} onClick={() => actions.setViewAs(p.id)} disabled={p.id === viewer.id}>{p.name} · {p.role}{p.id === viewer.id ? " (current)" : ""}</button>
+                  ))}
+                  <div className="menu-sep" />
+                  <button onClick={() => actions.reset()}><ArrowClockwise size={14} /> Reset demo data</button>
+                  <div className="menu-sep" />
+                </>
+              )}
+              <button onClick={() => logout()}><SignOut size={14} /> Sign out{authed ? ` (${authed.name.split(" ")[0]})` : ""}</button>
             </div>
           </details>
         </div>
@@ -365,6 +392,7 @@ function Shell() {
         </header>
         <Suspense fallback={booted ? <PageLoader /> : <AppSplash />}>
           <BootMark onReady={() => setBooted(true)} />
+          {!pageAllowed ? <RoleGate /> : (
           <Routes>
             <Route path="/" element={<HomeScreen />} />
             <Route path="/campaigns" element={<CampaignsScreen />} />
@@ -381,6 +409,7 @@ function Shell() {
             <Route path="/live" element={<LiveScreen />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          )}
         </Suspense>
       </section>
       {ctxOpen && <ContextPanel onClose={() => setCtxOpen(false)} />}

@@ -583,6 +583,7 @@ code { font-family: var(--font-mono); }
 
 /* Users & roles */
 .add-user-card { display: grid; grid-template-columns: 1fr 1.2fr 220px auto; gap: 12px; align-items: end; padding: 13px 14px; margin-bottom: 12px; border: 1px solid var(--brand-line); border-radius: var(--r-panel); background: #fff; }
+.edit-user-card { margin: 0; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; background: #f8f8fb; }
 .field label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
 .field input, .field select { width: 100%; height: 32px; padding: 0 10px; border: 1px solid #d9d9de; border-radius: var(--r-control); background: #fff; color: var(--ink); font: inherit; font-size: 13px; }
 .field input::placeholder { color: #8f8f97; }
@@ -1040,6 +1041,21 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 /* A directive round the agent just applied: strip + in-place field highlight */
 .change-strip.applied { border-color: var(--accent); background: var(--accent-soft, #e2f3ec); color: var(--accent-ink, #065f46); }
 .field-revised input { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft, #e2f3ec); }
+
+/* ===== Sign-in (role-based access; SSO replaces this in production) ===== */
+.login-screen { min-height: 100vh; display: grid; place-items: center; background: var(--bg, #f6f7f9); padding: 24px; }
+.login-card { width: 100%; max-width: 400px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 28px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 12px 40px rgba(20, 24, 40, 0.08); }
+.login-brand { display: flex; align-items: center; gap: 10px; }
+.login-brand strong { display: block; font-size: 14px; }
+.login-brand small { display: block; color: var(--muted); font-size: 11.5px; }
+.login-card h1 { margin: 4px 0 0; font-size: 20px; letter-spacing: -0.01em; }
+.login-sub { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.login-card .field label { font-size: 12px; }
+.login-card .field input { width: 100%; border: 1px solid var(--line); border-radius: var(--r-control); padding: 9px 11px; font: inherit; font-size: 13px; }
+.login-button { justify-content: center; height: 38px; }
+.login-note { margin: 2px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.add-user-note { margin: 8px 0 0; color: var(--muted); font-size: 11.5px; }
+.add-user-note code { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
 
 /* Campaign · Content production (live Campaign-in-a-Box) — full-width, responsive */
 .box-production-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
