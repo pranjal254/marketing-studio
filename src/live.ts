@@ -131,6 +131,41 @@ export type BoxDetail = {
   registered_assets: { asset_id: string; version: number; status: string }[];
 };
 
+/* ---------- Agent 3 (Content Repurposing) payload types ---------- */
+
+export type RepurposeSelfCheck = {
+  passed: boolean; attempts: number;
+  findings: { rule_id: string; severity: string; term: string; detail: string }[];
+  unsourced_numeric_tokens: string[]; missing_brand_mention: boolean;
+};
+
+export type RepurposeGapNote = { gap_id: string; asset_id: string; section: string; needed: string };
+
+export type RepurposeDraft = {
+  asset_id: string; asset_type: string; kind: "flagship" | "derivative"; title: string;
+  version: number; filename: string; file_rel: string | null; claim_map_rel: string | null;
+  sections: { heading: string; paragraphs: string[] }[];
+  claim_markers: { marker: string; claim: string; source_ref: string }[];
+  claim_lineage: string[]; self_check: RepurposeSelfCheck; gap_notes: RepurposeGapNote[];
+  status: "staged" | "withheld"; rework_of_version: number | null; created_at: string;
+};
+
+export type RepurposeDetail = {
+  case: {
+    status?: string; flagship_asset_id?: string; flagship_version?: number;
+    flagship_confirmation?: { actor_id: string; actor_role: string; timestamp: string } | null;
+    withheld_assets?: string[]; skipped_assets?: string[];
+  } | null;
+  status: string | null;
+  drafts: RepurposeDraft[];
+  inventory: {
+    flagship_version: number; method: string; dropped_unverified: number;
+    items: { claim_id: string; kind: string; text: string; source_ref: string }[];
+  } | null;
+  gap_notes: RepurposeGapNote[];
+  model: string;
+};
+
 /* The REAL Campaign-in-a-Box run, shaped for the studio store's mirror. */
 export type BoxSyncInput = {
   liveCampaignId: string;
@@ -155,12 +190,20 @@ export function buildBoxSync(detail: BoxDetail, records: StsRecord[]): BoxSyncIn
       : null,
     records: records.filter(
       (r) => r["shiftai.case.id"] === detail.summary.campaign_id
-        && r["shiftai.agent.id"] === "campaign_in_a_box",
+        && (r["shiftai.agent.id"] === "campaign_in_a_box"
+          || r["shiftai.agent.id"] === "content_repurposing"),
     ),
   };
 }
 
 /* ---------- fetch ---------- */
+
+export class LiveApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "LiveApiError";
+  }
+}
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${LIVE_API}${path}`, {
@@ -169,7 +212,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
+    throw new LiveApiError(body?.detail ?? `${response.status} ${response.statusText}`, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -262,6 +305,38 @@ export const liveApi = {
     }),
 
   boxTelemetry: () => call<StsRecord[]>("/api/telemetry?limit=1000"),
+
+  /* ---------- Agent 3: Content Repurposing ---------- */
+
+  boxFlagship: (campaignId: string, actorId: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/flagship`, {
+      method: "POST",
+      body: JSON.stringify({ actor_id: actorId }),
+    }),
+
+  boxDrafts: (campaignId: string) =>
+    call<RepurposeDetail>(`/api/box/campaigns/${campaignId}/drafts`),
+
+  boxFlagshipConfirm: (campaignId: string, actorId: string, actorRole: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/flagship/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ actor_id: actorId, actor_role: actorRole }),
+    }),
+
+  boxFanout: (campaignId: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/fanout`, {
+      method: "POST", body: "{}",
+    }),
+
+  boxRework: (campaignId: string, assetId: string, instruction: string, actorId: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/rework`, {
+      method: "POST",
+      body: JSON.stringify({ asset_id: assetId, instruction, actor_id: actorId }),
+    }),
+
+  /* Draft/claim-map download by workspace-relative path (from RepurposeDraft.file_rel). */
+  boxDraftUrl: (rel: string | null | undefined): string | null =>
+    rel ? tokenized(`${LIVE_API}/api/box/documents?path=${encodeURIComponent(rel)}`) : null,
 
   boxDocUrl: (folder: string | null | undefined, absoluteRef: string | null | undefined): string | null => {
     if (!folder || !absoluteRef) return null;

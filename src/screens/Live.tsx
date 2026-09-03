@@ -162,7 +162,8 @@ export default function LiveScreen() {
   const [form, setForm] = useState<Record<string, string>>({ ...SAMPLE_COMPLETE });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [actorId, setActorId] = useState("bu.lead@levelshift.com");
-  const [busy, setBusy] = useState(false);
+  const [busyOp, setBusyOp] = useState<string | null>(null);
+  const busy = busyOp !== null;
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionNonce, setSessionNonce] = useState(0);
@@ -226,18 +227,18 @@ export default function LiveScreen() {
     [events, selectedTrace],
   );
 
-  async function run(label: string, fn: () => Promise<void>) {
-    setBusy(true); setError(null);
+  async function run(op: string, label: string, fn: () => Promise<void>) {
+    setBusyOp(op); setError(null);
     try { await fn(); setFlash(label); window.setTimeout(() => setFlash(null), 2600); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(false); await refreshCases(); if (selected) await refreshDetail(selected); }
+    finally { setBusyOp(null); await refreshCases(); if (selected) await refreshDetail(selected); }
   }
 
   function submitRequest(event: FormEvent) {
     event.preventDefault();
     const request: Record<string, string> = {};
     Object.entries(form).forEach(([k, v]) => { if (v.trim()) request[k] = v.trim(); });
-    void run("Request sent to the live agent", async () => {
+    void run("send", "Request sent to the live agent", async () => {
       const outcome = await jsonFetch<{ case_id: string }>("/api/requests", {
         method: "POST", body: JSON.stringify({ source: "form", request }),
       });
@@ -249,7 +250,7 @@ export default function LiveScreen() {
   function sendAnswers(caseId: string, questions: GapQuestion[]) {
     const payload: Record<string, string> = {};
     questions.forEach((q) => { const v = answers[q.field]?.trim(); if (v) payload[q.field] = v; });
-    void run("Gap answers submitted — agent re-running", () =>
+    void run("answers", "Gap answers submitted — agent re-running", () =>
       jsonFetch(`/api/cases/${caseId}/answers`, {
         method: "POST",
         body: JSON.stringify({ answers: payload, actor_id: form.requester || "requester@levelshift.com" }),
@@ -257,7 +258,7 @@ export default function LiveScreen() {
   }
 
   function decide(caseId: string, decision: "approved" | "rejected") {
-    void run(`Brief ${decision} — recorded with identity`, async () => {
+    void run(decision, `Brief ${decision} — recorded with identity`, async () => {
       const outcome = await jsonFetch<{ brief?: { campaign_id?: string } | null }>(
         `/api/cases/${caseId}/decision`,
         { method: "POST", body: JSON.stringify({ decision, actor_id: actorId }) },
@@ -275,7 +276,7 @@ export default function LiveScreen() {
   }
 
   function freshSession() {
-    void run("Fresh session — prior cases archived on disk, clean slate", async () => {
+    void run("reset", "Fresh session — prior cases archived on disk, clean slate", async () => {
       await jsonFetch("/api/control/reset", { method: "POST", body: "{}" });
       lastSeq.current = 0;
       setEvents([]); setCases([]); setSelected(null); setDetail(null); setAnswers({});
@@ -286,7 +287,7 @@ export default function LiveScreen() {
   function toggleKillSwitch() {
     if (!health) return;
     const paused = health.kill_switch !== "paused";
-    void run(paused ? "Kill switch engaged — agent pauses before any action" : "Kill switch cleared", () =>
+    void run("kill", paused ? "Kill switch engaged — agent pauses before any action" : "Kill switch cleared", () =>
       jsonFetch("/api/control/kill-switch", {
         method: "POST", body: JSON.stringify({ paused, reason: "paused from studio UI" }),
       }).then(() => refreshHealth()));
@@ -315,7 +316,7 @@ export default function LiveScreen() {
           <p>Real Campaign Identification agent (Python) over the dev bridge — every row below is an STS v2 record emitted by actual runs{health ? ` · ${health.provider} / ${health.model} · config ${health.config_version}` : ""}.</p>
         </div>
         <div className="live-head-actions">
-          <button className="secondary-button" onClick={freshSession} disabled={busy} title="Start a clean session — prior cases stay archived on disk">
+          <button className="secondary-button" onClick={freshSession} disabled={busy} aria-busy={busyOp === "reset"} title="Start a clean session — prior cases stay archived on disk">
             <ArrowClockwise size={15} /> Fresh session
           </button>
           {health && (
@@ -355,7 +356,7 @@ export default function LiveScreen() {
               </div>
             ))}
             <div className="span2 live-submit-row">
-              <button type="submit" className="primary-button" disabled={busy}><Robot size={15} /> Send to agent</button>
+              <button type="submit" className="primary-button" disabled={busy} aria-busy={busyOp === "send"}>{busyOp === "send" ? <><span className="btn-spinner" aria-hidden="true" /> Agent processing…</> : <><Robot size={15} /> Send to agent</>}</button>
               <small>Missing fields become targeted gap questions — the agent never invents values.</small>
             </div>
           </form>
@@ -394,7 +395,7 @@ export default function LiveScreen() {
                         onChange={(e) => setAnswers({ ...answers, [q.field]: e.target.value })} />
                     </div>
                   ))}
-                  <button className="primary-button" disabled={busy} onClick={() => sendAnswers(selected, detail.gap_request?.questions ?? [])}>Submit answers</button>
+                  <button className="primary-button" disabled={busy} aria-busy={busyOp === "answers"} onClick={() => sendAnswers(selected, detail.gap_request?.questions ?? [])}>{busyOp === "answers" ? <><span className="btn-spinner" aria-hidden="true" /> Agent re-running…</> : "Submit answers"}</button>
                 </div>
               )}
 
@@ -403,8 +404,8 @@ export default function LiveScreen() {
                   <p className="meta-label">BU Campaign Lead gate — explicit human decision, recorded with identity</p>
                   <div className="field"><label htmlFor="live-actor">Approver identity</label><input id="live-actor" value={actorId} onChange={(e) => setActorId(e.target.value)} /></div>
                   <div className="live-gate-actions">
-                    <button className="primary-button" disabled={busy} onClick={() => decide(selected, "approved")}><CheckCircle size={15} /> Approve brief</button>
-                    <button className="secondary-button danger" disabled={busy} onClick={() => decide(selected, "rejected")}><XCircle size={15} /> Reject</button>
+                    <button className="primary-button" disabled={busy} aria-busy={busyOp === "approved"} onClick={() => decide(selected, "approved")}>{busyOp === "approved" ? <><span className="btn-spinner" aria-hidden="true" /> Recording…</> : <><CheckCircle size={15} /> Approve brief</>}</button>
+                    <button className="secondary-button danger" disabled={busy} aria-busy={busyOp === "rejected"} onClick={() => decide(selected, "rejected")}>{busyOp === "rejected" ? <><span className="btn-spinner" aria-hidden="true" /> Recording…</> : <><XCircle size={15} /> Reject</>}</button>
                   </div>
                 </div>
               )}

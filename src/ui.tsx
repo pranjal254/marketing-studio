@@ -25,6 +25,33 @@ export function Chip({ children, tone = "neutral" }: { children: ReactNode; tone
   return <span className={`chip ${tone}`}>{children}</span>;
 }
 
+/* One button family for every async action: the clicked button shows a spinner
+   + progress label and every sibling passed the same `disabled` goes inert, so a
+   click ALWAYS has visible feedback while the bridge call runs. */
+export function BusyButton({
+  busy, busyLabel = "Working…", kind = "primary", className, disabled, onClick, children,
+}: {
+  busy: boolean;
+  busyLabel?: string;
+  kind?: "primary" | "secondary";
+  className?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={`${kind}-button${className ? ` ${className}` : ""}`}
+      onClick={onClick}
+      disabled={disabled || busy}
+      aria-busy={busy}
+    >
+      {busy ? (<><span className="btn-spinner" aria-hidden="true" /> {busyLabel}</>) : children}
+    </button>
+  );
+}
+
 export function MiniSource({ children }: { children: ReactNode }) {
   return <span className="source-chip">{children}</span>;
 }

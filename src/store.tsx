@@ -3,7 +3,7 @@ import type {
   AppState, ApprovalRecord, Asset, Campaign, Notification, Person, Task, TelemetryEvent,
 } from "./types";
 import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor, type DerivedBrief } from "./data";
-import { buildBoxSync, liveApi, type BoxSyncInput } from "./live";
+import { buildBoxSync, liveApi, LiveApiError, type BoxSyncInput } from "./live";
 import { DEFAULT_PASSWORD, isAdmin } from "./access";
 
 const AUTH_KEY = "shiftai.auth";
@@ -119,6 +119,9 @@ function boxEventSummary(r: Record<string, unknown>): string {
       const what = String(r["shiftai.decision.action_class"] ?? "");
       if (what === "audience_offer_pack") return "Audience & offer pack drafted (grounded proof points)";
       if (what === "asset_checklist") return "Reuse/adapt/create checklist + outlines decided";
+      if (what === "flagship_draft") return "Flagship drafted from the approved outline (sourced claims only)";
+      if (what === "claim_inventory") return "Claim inventory extracted from the confirmed flagship (verbatim-verified)";
+      if (what.startsWith("derivative:")) return `Channel derivative drafted: ${what.slice(11).replace(/_/g, " ")}`;
       return `Decision: ${what || "abstained"}`;
     }
     case "case_escalated": return `Escalated to ${r["shiftai.escalation.routed_to"]}: ${r["shiftai.learn.reason_code"]}`;
@@ -126,6 +129,7 @@ function boxEventSummary(r: Record<string, unknown>): string {
       const cls = String(r["shiftai.action.class"] ?? "");
       if (cls === "route_for_confirmation") return "Pack + plan routed to the Marketing Lead for confirmation";
       if (cls === "register_package_manifest") return "Campaign-in-a-Box manifest registered (hashed, pending compliance)";
+      if (cls === "stage_draft") return `Draft staged in the campaign workspace: ${r["shiftai.draft.asset_id"] ?? "asset"} v${r["shiftai.draft.version"] ?? ""}`;
       return cls;
     }
     case "human_gate": return `Human gate: ${r["shiftai.hitl.decision"]} by ${r["shiftai.hitl.actor.role"]}`;
@@ -147,13 +151,14 @@ function boxEventFromSts(
   const tokensIn = r["gen_ai.usage.input_tokens"];
   const cost = r["shiftai.cost.scope"] === "span_incremental" && typeof r["shiftai.cost.amount"] === "number"
     ? (r["shiftai.cost.amount"] as number) : 0;
+  const isRepurposer = r["shiftai.agent.id"] === "content_repurposing";
   return {
     id: `evb_${seq}`,
     ts: Date.parse(String(r["shiftai.timestamp"])) || Date.now(),
     trace_id: String(r["shiftai.trace.id"] ?? ""),
     run_id: String(r["shiftai.run.id"] ?? `run_b${seq}`),
     span_id: String(r["shiftai.span.id"] ?? `sp_b${seq}`),
-    agent: "CB",
+    agent: isRepurposer ? "CR" : "CB",
     campaignId,
     activity: type === "tool_execution" ? String(r["gen_ai.tool.name"] ?? type) : type,
     summary: boxEventSummary(r),
@@ -166,7 +171,9 @@ function boxEventFromSts(
     cost_usd: cost,
     timing: { llm_ms: type === "decision_made" ? dur : 0, api_ms: type === "tool_execution" ? dur : 0, queue_ms: 0, total_ms: dur },
     outcome: type === "case_escalated" ? "escalated" : type === "error" ? "blocked" : "success",
-    sources: ["Live STS record (Campaign-in-a-Box)"],
+    sources: [isRepurposer
+      ? "Live STS record (Content Repurposing)"
+      : "Live STS record (Campaign-in-a-Box)"],
     systemExecuted: !human,
   };
 }
@@ -803,7 +810,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             } else if (detail.summary.status !== "planning") {
               reconciled.current.add(c.id); // already past the gate — mirror synced
             }
-          } catch { /* plan still running or bridge down — try again next tick */ }
+          } catch (e) {
+            if (e instanceof LiveApiError && e.status === 404) {
+              // The bridge no longer knows this campaign — its state was reset
+              // (restart / new session / free-tier redeploy). Stop polling for
+              // good and tell the owner once; the local journey stays intact.
+              reconciled.current.add(c.id);
+              emit({
+                ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: c.id,
+                activity: "live_link_lost", outcome: "blocked", system: true,
+                summary: "Live campaign state no longer exists on the agent bridge (it restarted). Create a new campaign to run the live flow again.",
+              });
+              notify(c.ownerId, `${c.name}: the agent bridge restarted and this campaign's live state is gone — create a new campaign to re-run the flow`, c.id);
+            }
+            /* otherwise: plan still running or bridge down — try again next tick */
+          }
         }
       } finally { busy = false; }
     }

@@ -164,8 +164,9 @@ function TaskDetail({ task }: { task: Task }) {
       </div>
       <DecisionFooter
         task={task}
-        cta={deciding ? "Recording…" : c.cta}
+        cta={deciding ? "Recording your decision…" : c.cta}
         onDecide={c.act}
+        busy={deciding}
         allowReturn={task.kind === "brief_approval"}
         onReturn={task.kind === "brief_approval" ? (note) => void returnLive(note) : undefined}
       />
@@ -398,7 +399,7 @@ function AssetListPanel({ campaignId, onOpen }: { campaignId: string; onOpen: (a
   );
 }
 
-function DecisionFooter({ task, cta, onDecide, allowReturn, onReturn }: { task: Task; cta: string; onDecide: () => void; allowReturn?: boolean; onReturn?: (note: string) => void }) {
+function DecisionFooter({ task, cta, onDecide, allowReturn, onReturn, busy }: { task: Task; cta: string; onDecide: () => void; allowReturn?: boolean; onReturn?: (note: string) => void; busy?: boolean }) {
   const { actions } = useStore();
   const [returning, setReturning] = useState(false);
   const [note, setNote] = useState("");
@@ -406,15 +407,15 @@ function DecisionFooter({ task, cta, onDecide, allowReturn, onReturn }: { task: 
   return (
     <div className="decision-footer">
       {returning ? (
-        <form className="return-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (note.trim()) { submitReturn(note.trim()); } }}>
+        <form className="return-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (note.trim() && !busy) { submitReturn(note.trim()); } }}>
           <div className="field"><label htmlFor="return-note">Note to the requester (type or dictate)</label><div className="input-with-mic"><input id="return-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What needs to change before approval?" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
-          <button type="submit" className="secondary-button" disabled={!note.trim()}>Send back</button>
-          <button type="button" className="text-button" onClick={() => setReturning(false)}>Cancel</button>
+          <button type="submit" className="secondary-button" disabled={!note.trim() || busy} aria-busy={busy}>{busy ? <><span className="btn-spinner" aria-hidden="true" /> Sending back…</> : "Send back"}</button>
+          <button type="button" className="text-button" disabled={busy} onClick={() => setReturning(false)}>Cancel</button>
         </form>
       ) : (
         <>
-          <div><small>Your decision is recorded with identity, timestamp, asset version and content hash.</small>{allowReturn && <button className="text-button" onClick={() => setReturning(true)}>Return with note</button>}</div>
-          <button className="primary-button" onClick={onDecide}><Check size={15} weight="bold" /> {cta}</button>
+          <div><small>Your decision is recorded with identity, timestamp, asset version and content hash.</small>{allowReturn && <button className="text-button" disabled={busy} onClick={() => setReturning(true)}>Return with note</button>}</div>
+          <button className="primary-button" onClick={onDecide} disabled={busy} aria-busy={busy}>{busy ? <span className="btn-spinner" aria-hidden="true" /> : <Check size={15} weight="bold" />} {cta}</button>
         </>
       )}
     </div>

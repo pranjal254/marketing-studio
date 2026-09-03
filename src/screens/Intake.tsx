@@ -533,7 +533,7 @@ export default function IntakeScreen() {
               <div className="field"><label htmlFor="br-note">Instruction (type or dictate)</label><div className="input-with-mic"><input id="br-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. lead with the executive outcome" /><MicButton onText={(t) => setNote((prev) => prev ? `${prev} ${t}` : t)} /></div></div>
               <div className="directive-foot">
                 <small>{busy ? "Agent revising…" : "The agent redrafts; you decide when it leaves this page."}</small>
-                <button type="submit" className="primary-button" disabled={busy}><PaperPlaneTilt size={14} /> Send directive</button>
+                <button type="submit" className="primary-button" disabled={busy} aria-busy={busy}>{busy ? <><span className="btn-spinner" aria-hidden="true" /> Agent revising…</> : <><PaperPlaneTilt size={14} /> Send directive</>}</button>
               </div>
             </form>
 
@@ -551,8 +551,8 @@ export default function IntakeScreen() {
                 <p className="send-ready">Everything is in place. Sending records your verification and routes the real approval task.</p>
               )}
               {error && <p className="form-error" role="alert">{error}</p>}
-              <button className="primary-button send-button" onClick={() => void send()} disabled={missing.length > 0 || busy}><ArrowRight size={15} /> {busy ? "Sending…" : "Send for approval"}</button>
-              <button className="text-button" onClick={startOver}><Trash size={13} /> Start over (draft stays archived with the agent)</button>
+              <button className="primary-button send-button" onClick={() => void send()} disabled={missing.length > 0 || busy} aria-busy={busy}>{busy ? <><span className="btn-spinner" aria-hidden="true" /> Sending — the agent re-validates…</> : <><ArrowRight size={15} /> Send for approval</>}</button>
+              <button className="text-button" onClick={startOver} disabled={busy}><Trash size={13} /> Start over (draft stays archived with the agent)</button>
             </section>
           </aside>
         </div>
