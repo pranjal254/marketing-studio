@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText } from "@phosphor-icons/react";
 import { campaignCost, openTasksFor, personById, useStore } from "../store";
 import { flagshipDoc, fullStamp, journeySteps, phaseLabels, stampTime, toneVars } from "../data";
+import { LiveBoxPackPanel, LiveProductionPanel } from "../boxPanels";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
@@ -93,7 +94,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
       </section>
       <section className="campaign-summary-strip">
         <div><small>Journey progress</small><strong>{campaign.state === "approved_locked" ? "9 of 9 steps" : `${campaign.step} of 9 steps`}</strong><ProgressSteps active={campaign.state === "approved_locked" ? 9 : campaign.step - 1} /></div>
-        <div><small>Content assets</small><strong>{assets.length === 0 ? "Not planned yet" : `${assets.length} registered`}</strong><span>{assets.length > 0 ? "1 flagship + 8 derivatives" : "Checklist arrives at step 3"}</span></div>
+        <div><small>Content assets</small><strong>{assets.length === 0 ? "Not planned yet" : `${assets.length} registered`}</strong><span>{assets.length > 0 ? "From the Campaign-in-a-Box checklist" : "Checklist arrives at step 3"}</span></div>
         <div><small>Waiting on</small><strong>{openTasks.length > 0 ? personById(state, openTasks[0].assigneeId)?.name : campaign.state === "approved_locked" ? "Nobody" : <>Agents executing<InlineDots /></>}</strong><span>{openTasks.length > 0 ? openTasks[0].title : campaign.state === "approved_locked" ? "Package locked read-only" : "No human gate open"}</span></div>
         <div><small>AI cost so far</small><strong>${cost.toFixed(2)}</strong><span>Within $6.00 envelope</span></div>
       </section>
@@ -158,6 +159,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
             <div className="proof-box"><FileText size={18} /><div><strong>Offer framing</strong><p>{campaign.topic}. Grounded in LevelShift delivery experience; every claim traces to a verified source.</p></div></div>
             <div className="source-row"><MiniSource>Quarterly plan Q3</MiniSource><MiniSource>SemRush</MiniSource><MiniSource>Brand guidelines</MiniSource></div>
             {campaign.request && <p className="brief-origin">Drafted by Campaign Identification from {personById(state, campaign.requesterId)?.name.split(" ")[0]}'s request: "{campaign.request}"</p>}
+            {campaign.liveCampaignId && <LiveBoxPackPanel campaign={campaign} />}
           </section>
           <section className="asset-plan-card">
             <div className="panel-heading"><div><p className="meta-label">Reuse before create</p><h2>Asset checklist</h2></div><span className="small-link">{assets.length || "0"} registered</span></div>
@@ -173,6 +175,10 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
             {assets.length > 6 && <button className="table-link" onClick={() => setTab("content")}>View all {assets.length} assets <ArrowRight size={13} /></button>}
           </section>
         </div>
+      )}
+
+      {tab === "content" && campaign.liveCampaignId && (
+        <LiveProductionPanel campaign={campaign} />
       )}
 
       {tab === "content" && flagship && flagship.versions.length > 0 && (() => {

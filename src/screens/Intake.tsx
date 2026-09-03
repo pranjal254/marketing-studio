@@ -14,7 +14,7 @@ import { Chip, MicButton, MiniSource, Monogram } from "../ui";
 import { InlineDots } from "../loaders";
 import {
   CHANNEL_SLUG, LIVE_API, SEGMENT_LABEL, SEGMENT_SLUG, VERTICAL_LABEL, VERTICAL_SLUG,
-  channelChecked, liveApi, stsMeta, stsSummary,
+  authHeaders, channelChecked, liveApi, stsMeta, stsSummary,
   type LiveCaseDetail, type StsRecord,
 } from "../live";
 
@@ -84,6 +84,11 @@ export default function IntakeScreen() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Result of the latest directive round: which draft fields the agent actually
+  // rewrote (so the change is visible in place, not implied).
+  const [lastDirective, setLastDirective] = useState<{
+    changed: { field: "objective" | "topic"; label: string; before: string }[];
+  } | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -128,7 +133,7 @@ export default function IntakeScreen() {
     };
 
     async function adoptNewestOpenCase(): Promise<boolean> {
-      const cases = await fetch(`${LIVE_API}/api/cases`).then((r) => r.json()) as
+      const cases = await fetch(`${LIVE_API}/api/cases`, { headers: authHeaders() }).then((r) => r.json()) as
         { case_id: string; status: string; request?: { requester?: string | null } | null }[];
       const mine = cases.find(
         (c) => (c.status === "awaiting_input" || c.status === "draft_review")
@@ -225,14 +230,32 @@ export default function IntakeScreen() {
       return;
     }
     setError(""); setBusy(true);
+    const beforeObjective = detail?.summary.request?.objective ?? "";
+    const beforeTopic = detail?.summary.request?.offer_topic ?? "";
     try {
       await liveApi.revise(caseId, note.trim(), aspects, viewer.email);
-      await loadCase(caseId);
+      const d = await liveApi.getCase(caseId);
+      if (mounted.current) {
+        setDetail(d);
+        setForm(formFromDetail(d));
+        void refreshEvents(d.summary.trace_id);
+        const changed: { field: "objective" | "topic"; label: string; before: string }[] = [];
+        if ((d.summary.request?.objective ?? "") !== beforeObjective)
+          changed.push({ field: "objective", label: "Objective", before: beforeObjective });
+        if ((d.summary.request?.offer_topic ?? "") !== beforeTopic)
+          changed.push({ field: "topic", label: "Offer / topic", before: beforeTopic });
+        setLastDirective({ changed });
+      }
       setAspects([]); setNote("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }
+
+  const revisedField = (field: "objective" | "topic") =>
+    lastDirective?.changed.some((c) => c.field === field) ?? false;
+
+  const trunc = (s: string, n = 90) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
   const gapFields = new Set(detail?.gap_request?.questions.map((q) => q.field) ?? []);
   const derived = detail?.summary.derived_fields ?? {};
@@ -286,7 +309,7 @@ export default function IntakeScreen() {
   function startOver() {
     rememberCase(null);
     setDetail(null); setEvents([]); setForm(EMPTY_FORM); setDescription("");
-    setAspects([]); setNote(""); setError("");
+    setAspects([]); setNote(""); setError(""); setLastDirective(null);
     setPhase("describe");
   }
 
@@ -401,17 +424,38 @@ export default function IntakeScreen() {
         {returnedNote && (
           <div className="change-strip revision"><ArrowsClockwise size={14} /><p>Returned by the BU Campaign Lead: "{returnedNote}" — revise and send again.</p></div>
         )}
+        {lastDirective && (lastDirective.changed.length > 0 ? (
+          <div className="change-strip applied">
+            <ArrowsClockwise size={14} />
+            <p>
+              Directive applied — the agent rewrote{" "}
+              {lastDirective.changed.map((c) => `${c.label} (was: "${trunc(c.before)}")`).join(" · ")}.
+              The new wording is highlighted in the draft below.
+            </p>
+          </div>
+        ) : (
+          <div className="change-strip">
+            <ArrowsClockwise size={14} />
+            <p>The agent reviewed your directive but kept the draft unchanged — try a more specific instruction (e.g. "rewrite the objective around qualified pipeline for mid-market plants").</p>
+          </div>
+        ))}
         <div className="brief-review-layout">
           <section className="brief-doc">
             <p className="doc-kicker">{form.bu || "Business unit not set"} · {form.vertical || "Vertical not set"}</p>
             <div className="form-grid brief-fields">
-              <div className="field field-full">
-                <div className="field-label-row"><label htmlFor="br-objective">Objective</label>{fieldChip("objective")}</div>
+              <div className={`field field-full${revisedField("objective") ? " field-revised" : ""}`}>
+                <div className="field-label-row">
+                  <label htmlFor="br-objective">Objective</label>
+                  {revisedField("objective") ? <Chip tone="green">Updated by directive</Chip> : fieldChip("objective")}
+                </div>
                 <input id="br-objective" value={form.objective} onChange={(e) => setForm({ ...form, objective: e.target.value })} />
                 {derived.objective && <small className="field-provenance">"{derived.objective}"</small>}
               </div>
-              <div className="field field-full">
-                <div className="field-label-row"><label htmlFor="br-topic">Offer or topic</label>{fieldChip("offer_topic")}</div>
+              <div className={`field field-full${revisedField("topic") ? " field-revised" : ""}`}>
+                <div className="field-label-row">
+                  <label htmlFor="br-topic">Offer or topic</label>
+                  {revisedField("topic") ? <Chip tone="green">Updated by directive</Chip> : fieldChip("offer_topic")}
+                </div>
                 <input id="br-topic" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} />
               </div>
               <div className="field">
@@ -470,8 +514,13 @@ export default function IntakeScreen() {
                 <Monogram size="sm">CI</Monogram>
                 <div>
                   <strong>Directive to Campaign Identification</strong>
-                  <small>The real agent redrafts your objective/topic; every round is recorded with your identity</small>
+                  <small>The real agent redrafts the two lines below; every round is recorded with your identity</small>
                 </div>
+              </div>
+              <div className="directive-current">
+                <small>Current draft — what the agent will redraft</small>
+                <p><strong>Objective:</strong> {detail.summary.request?.objective?.trim() || "— (nothing extracted yet)"}</p>
+                <p><strong>Offer / topic:</strong> {detail.summary.request?.offer_topic?.trim() || "— (nothing extracted yet)"}</p>
               </div>
               <div>
                 <p className="meta-label">What should change?</p>

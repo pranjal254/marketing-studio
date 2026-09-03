@@ -8,6 +8,7 @@ import {
   Pause, Play, Plugs, Robot, WarningCircle, XCircle,
 } from "@phosphor-icons/react";
 import { Chip } from "../ui";
+import { authHeaders, liveApi, tokenized } from "../live";
 
 const API = (import.meta.env.VITE_LIVE_API as string | undefined) ?? "http://localhost:8787";
 
@@ -139,7 +140,8 @@ function escalationCitations(detail: Record<string, unknown> | undefined): strin
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" }, ...init,
+    ...init,
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -187,7 +189,7 @@ export default function LiveScreen() {
     void refreshHealth();
     void refreshCases();
     let poll: number | undefined;
-    const source = new EventSource(`${API}/api/stream`);
+    const source = new EventSource(tokenized(`${API}/api/stream`));
     const onRecord = (r: StsRecord) => {
       const seq = Number(r["bridge.seq"] ?? 0);
       if (seq <= lastSeq.current) return;
@@ -255,10 +257,21 @@ export default function LiveScreen() {
   }
 
   function decide(caseId: string, decision: "approved" | "rejected") {
-    void run(`Brief ${decision} — recorded with identity`, () =>
-      jsonFetch(`/api/cases/${caseId}/decision`, {
-        method: "POST", body: JSON.stringify({ decision, actor_id: actorId }),
-      }).then(() => undefined));
+    void run(`Brief ${decision} — recorded with identity`, async () => {
+      const outcome = await jsonFetch<{ brief?: { campaign_id?: string } | null }>(
+        `/api/cases/${caseId}/decision`,
+        { method: "POST", body: JSON.stringify({ decision, actor_id: actorId }) },
+      );
+      // Approval triggers the REAL Campaign-in-a-Box planning pass (spec:
+      // event-triggered on brief approval). Fire-and-forget: its STS records
+      // arrive on this stream as the run progresses.
+      const campaignId = outcome.brief?.campaign_id;
+      if (decision === "approved" && campaignId) {
+        void jsonFetch(`/api/box/campaigns/${campaignId}/plan`, {
+          method: "POST", body: JSON.stringify({ actor_id: actorId }),
+        }).catch(() => undefined);
+      }
+    });
   }
 
   function freshSession() {
@@ -413,7 +426,7 @@ export default function LiveScreen() {
               {detail.summary.doc_ref && (
                 <p className="live-note">
                   <DownloadSimple size={14} />{" "}
-                  <a className="text-link" href={`${API}/api/documents/${detail.summary.doc_ref.split(/[\\/]/).pop()}`} target="_blank" rel="noreferrer">
+                  <a className="text-link" href={liveApi.docUrl(detail.summary.doc_ref) ?? "#"} target="_blank" rel="noreferrer">
                     Download brief (.docx) <ArrowSquareOut size={12} />
                   </a>
                 </p>

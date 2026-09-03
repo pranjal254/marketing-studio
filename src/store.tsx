@@ -3,6 +3,7 @@ import type {
   AppState, ApprovalRecord, Asset, Campaign, Notification, Person, Task, TelemetryEvent,
 } from "./types";
 import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor, type DerivedBrief } from "./data";
+import { buildBoxSync, liveApi, type BoxSyncInput } from "./live";
 
 const STORAGE_KEY = "shiftai.demo.v3";
 
@@ -79,14 +80,93 @@ export type IntakeForm = {
 };
 
 /* An approved-for-routing brief coming from the REAL agent (bridge): mirrored into
-   the demo store so the rest of the studio journey continues (real step 1,
-   simulated steps 2–9 until agents 2–5 are built). */
+   the demo store so the rest of the studio journey continues (real steps 1–3,
+   simulated steps 4–9 until agents 3–5 are built). */
 export type MirrorLiveBrief = {
   caseId: string; name: string; objective: string; topic: string; bu: string;
   vertical: string; segment: string; channels: string[];
   window: { start: string; end: string }; budgetApproved: boolean;
   request: string; briefVersion: string;
 };
+
+/* The REAL Campaign-in-a-Box plan mirrored into the studio journey: status,
+   checklist and the agent's actual STS telemetry (real model, tokens, cost).
+   Shape built by live.buildBoxSync. */
+export type SyncLiveBoxInput = BoxSyncInput;
+
+const BOX_ASSET_STATE: Record<string, Asset["state"]> = {
+  planned: "planned", in_production: "drafting", reopened: "drafting",
+  content_confirmed: "content_confirmed", packaged: "approved",
+};
+
+function boxEventSummary(r: Record<string, unknown>): string {
+  const type = String(r["shiftai.event.type"]);
+  switch (type) {
+    case "case_intake": return "Approved brief picked up by Campaign-in-a-Box";
+    case "tool_execution": {
+      const tool = String(r["gen_ai.tool.name"] ?? "");
+      if (tool === "intel.gather") return `Intel gathered (${r["shiftai.intel.mode"] ?? "sourced"}, ${r["shiftai.intel.signal_count"] ?? "?"} signals with provenance)`;
+      if (tool === "repository.search") return `Repository reuse scan: ${r["shiftai.repository.candidates"] ?? 0} candidates scored`;
+      if (tool === "workspace.create_campaign") return "Campaign workspace created from the versioned template";
+      if (tool === "grounding.exclude_unsourced") return "Unsourced claims excluded by grounding (never published)";
+      return tool || "Tool executed";
+    }
+    case "policy_check": return `Policy pass: ${r["shiftai.policy.decision"]}`;
+    case "decision_made": {
+      const what = String(r["shiftai.decision.action_class"] ?? "");
+      if (what === "audience_offer_pack") return "Audience & offer pack drafted (grounded proof points)";
+      if (what === "asset_checklist") return "Reuse/adapt/create checklist + outlines decided";
+      return `Decision: ${what || "abstained"}`;
+    }
+    case "case_escalated": return `Escalated to ${r["shiftai.escalation.routed_to"]}: ${r["shiftai.learn.reason_code"]}`;
+    case "action_taken": {
+      const cls = String(r["shiftai.action.class"] ?? "");
+      if (cls === "route_for_confirmation") return "Pack + plan routed to the Marketing Lead for confirmation";
+      if (cls === "register_package_manifest") return "Campaign-in-a-Box manifest registered (hashed, pending compliance)";
+      return cls;
+    }
+    case "human_gate": return `Human gate: ${r["shiftai.hitl.decision"]} by ${r["shiftai.hitl.actor.role"]}`;
+    case "case_resolved": return "Pack and plan confirmed — assets in production";
+    case "run_summary": return `Run complete: ${r["shiftai.outcome"]}`;
+    case "error": return `Error: ${r["error.type"]}`;
+    default: return type;
+  }
+}
+
+function boxEventFromSts(
+  r: Record<string, unknown> & { "bridge.seq"?: number }, campaignId: string,
+): TelemetryEvent | null {
+  const seq = r["bridge.seq"];
+  const type = String(r["shiftai.event.type"]);
+  if (seq == null || type === "config_loaded") return null;
+  const human = type === "human_gate";
+  const dur = Number(r["shiftai.span.duration_ms"] ?? 0);
+  const tokensIn = r["gen_ai.usage.input_tokens"];
+  const cost = r["shiftai.cost.scope"] === "span_incremental" && typeof r["shiftai.cost.amount"] === "number"
+    ? (r["shiftai.cost.amount"] as number) : 0;
+  return {
+    id: `evb_${seq}`,
+    ts: Date.parse(String(r["shiftai.timestamp"])) || Date.now(),
+    trace_id: String(r["shiftai.trace.id"] ?? ""),
+    run_id: String(r["shiftai.run.id"] ?? `run_b${seq}`),
+    span_id: String(r["shiftai.span.id"] ?? `sp_b${seq}`),
+    agent: "CB",
+    campaignId,
+    activity: type === "tool_execution" ? String(r["gen_ai.tool.name"] ?? type) : type,
+    summary: boxEventSummary(r),
+    actor: human ? { type: "human" } : { type: "agent" },
+    model: r["gen_ai.response.model"] ? String(r["gen_ai.response.model"]) : undefined,
+    prompt_version: r["shiftai.prompt.template.version"]
+      ? String(r["shiftai.prompt.template.version"]) : undefined,
+    tokens: typeof tokensIn === "number"
+      ? { input: tokensIn, output: Number(r["gen_ai.usage.output_tokens"] ?? 0) } : undefined,
+    cost_usd: cost,
+    timing: { llm_ms: type === "decision_made" ? dur : 0, api_ms: type === "tool_execution" ? dur : 0, queue_ms: 0, total_ms: dur },
+    outcome: type === "case_escalated" ? "escalated" : type === "error" ? "blocked" : "success",
+    sources: ["Live STS record (Campaign-in-a-Box)"],
+    systemExecuted: !human,
+  };
+}
 
 type Store = {
   state: AppState;
@@ -108,8 +188,10 @@ type Store = {
     sendBrief: (campaignId: string) => void;
     discardDraft: (campaignId: string) => void;
     answerGaps: (taskId: string, segment: string, budget: string) => void;
-    approveBrief: (taskId: string) => void;
+    approveBrief: (taskId: string, liveCampaignId?: string) => void;
     returnBrief: (taskId: string, note: string) => void;
+    syncLiveBox: (input: SyncLiveBoxInput) => void;
+    completeLivePlanConfirm: (taskId: string) => void;
     confirmPlan: (taskId: string) => void;
     decideConflict: (taskId: string, decision: "recommended" | "operational" | "returned", note?: string) => void;
     completeReview: (taskId: string) => void;
@@ -322,23 +404,135 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       showToast("Answers sent, brief re-validation queued");
     },
 
-    approveBrief: (taskId) => {
+    approveBrief: (taskId, liveCampaignId) => {
       const task = state.tasks.find((t) => t.id === taskId);
       if (!task) return;
       const trace = uid("tr");
       const campaign = state.campaigns.find((c) => c.id === task.campaignId);
+      const isLive = Boolean(task.liveCaseId ?? campaign?.liveCaseId);
       dispatch({ type: "TASK_PATCH", id: taskId, patch: { status: "done", resolution: { decision: "Brief approved", byId: state.viewAsId, at: Date.now() } } });
       record(task.campaignId, "Brief approved", state.viewAsId, "v1.0");
-      dispatch({ type: "CAMPAIGN_PATCH", id: task.campaignId, patch: { state: "planning", step: 2 } });
-      emit({ ts: Date.now(), trace, agent: "studio", campaignId: task.campaignId, activity: "brief_approved", summary: `Brief approved by ${viewer.name}`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "brief_pending_approval", current: "planning", reason: "BU Campaign Lead approval recorded with identity and timestamp" } });
-      later(900, () => emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "pull_intel", summary: "SemRush and intel library scan complete", tokens: { input: 8200, output: 1900 }, cost: 0.17, llm: 15000, api: 4800, sources: ["SemRush", "OneDrive intel library"] }));
-      later(1900, () => {
-        emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "plan_campaign", summary: "Audience & offer pack, 9-asset checklist and workspace created", tokens: { input: 19600, output: 5300 }, cost: 0.55, llm: 37000, sources: ["Brief v1.0", "Workspace template v2.0"] });
-        dispatch({ type: "CAMPAIGN_PATCH", id: task.campaignId, patch: { step: 3 } });
-        addTask({ kind: "plan_confirm", campaignId: task.campaignId, title: "Confirm audience & offer", detail: `${campaign?.name ?? "Campaign"} · pack and plan proposed by Campaign-in-a-Box`, assigneeId: campaign?.ownerId ?? "rishi", slaHours: 48 });
-        notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: audience & offer pack is ready for your confirmation`, task.campaignId);
+      dispatch({
+        type: "CAMPAIGN_PATCH", id: task.campaignId,
+        patch: { state: "planning", step: 2, ...(liveCampaignId ? { liveCampaignId } : {}) },
       });
+      emit({ ts: Date.now(), trace, agent: "studio", campaignId: task.campaignId, activity: "brief_approved", summary: `Brief approved by ${viewer.name}`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "brief_pending_approval", current: "planning", reason: "BU Campaign Lead approval recorded with identity and timestamp" } });
+      if (isLive) {
+        // Steps 2–3 are REAL: on approval the studio triggers the actual
+        // Campaign-in-a-Box planning pass on the bridge (spec: planning is
+        // event-triggered by brief approval — nobody "runs an agent"). When it
+        // finishes, the pack + plan land as a confirmation task in Approvals and
+        // the agent's real telemetry is mirrored into this journey.
+        const owner = campaign?.ownerId ?? "rishi";
+        emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "planning_started", summary: "Approved brief handed to the REAL Campaign-in-a-Box agent — planning pass running (1–3 min)", cost: 0, sources: ["Live agent bridge"] });
+        if (liveCampaignId) {
+          void (async () => {
+            try {
+              await liveApi.boxPlan(liveCampaignId, viewer.email);
+              const detail = await liveApi.boxDetail(liveCampaignId);
+              const records = await liveApi.boxTelemetry();
+              actions.syncLiveBox(buildBoxSync(detail, records));
+              if (detail.summary.status === "awaiting_confirmation") {
+                addTask({
+                  kind: "plan_confirm", campaignId: task.campaignId,
+                  title: "Confirm audience & offer pack + plan",
+                  detail: `${campaign?.name ?? "Campaign"} · proposed by the LIVE Campaign-in-a-Box agent`,
+                  assigneeId: owner, slaHours: 48, liveCaseId: liveCampaignId,
+                });
+                notify(owner, `${campaign?.name ?? "Campaign"}: the real audience & offer pack and plan are ready for your confirmation`, task.campaignId);
+              } else {
+                notify(owner, `${campaign?.name ?? "Campaign"}: planning finished with status ${detail.summary.status.replace(/_/g, " ")} — see Live agents`, task.campaignId);
+              }
+            } catch (e) {
+              emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "planning_failed", summary: `Planning pass failed: ${e instanceof Error ? e.message : e}`, cost: 0, outcome: "blocked", sources: ["Live agent bridge"] });
+              notify(owner, `${campaign?.name ?? "Campaign"}: the planning pass failed — check the bridge (Live agents)`, task.campaignId);
+            }
+          })();
+        }
+      } else {
+        later(900, () => emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "pull_intel", summary: "SemRush and intel library scan complete", tokens: { input: 8200, output: 1900 }, cost: 0.17, llm: 15000, api: 4800, sources: ["SemRush", "OneDrive intel library"] }));
+        later(1900, () => {
+          emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "plan_campaign", summary: "Audience & offer pack, 9-asset checklist and workspace created", tokens: { input: 19600, output: 5300 }, cost: 0.55, llm: 37000, sources: ["Brief v1.0", "Workspace template v2.0"] });
+          dispatch({ type: "CAMPAIGN_PATCH", id: task.campaignId, patch: { step: 3 } });
+          addTask({ kind: "plan_confirm", campaignId: task.campaignId, title: "Confirm audience & offer", detail: `${campaign?.name ?? "Campaign"} · pack and plan proposed by Campaign-in-a-Box`, assigneeId: campaign?.ownerId ?? "rishi", slaHours: 48 });
+          notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: audience & offer pack is ready for your confirmation`, task.campaignId);
+        });
+      }
       showToast("Brief approved and recorded");
+    },
+
+    /* Mirror of the REAL Campaign-in-a-Box run: journey position, the actual
+       checklist (reuse/adapt/create) and the agent's real telemetry — model that
+       ran, real token counts, cost priced by the fleet rate card. Idempotent. */
+    syncLiveBox: (input) => {
+      const campaign = state.campaigns.find(
+        (c) => c.liveCampaignId === input.liveCampaignId || c.id === input.liveCampaignId,
+      );
+      if (!campaign) return;
+
+      const target: { state: Campaign["state"]; step: number } | null =
+        input.status === "awaiting_confirmation" ? { state: "planning", step: 2 }
+        : input.status === "in_production" || input.status === "packaging_blocked"
+          ? { state: "in_production", step: 4 }
+        : input.status === "packaged_pending_compliance"
+          ? { state: "packaged_pending_compliance", step: 7 }
+        : null;
+      if (target && (campaign.state !== target.state || campaign.step !== target.step)) {
+        dispatch({ type: "CAMPAIGN_PATCH", id: campaign.id, patch: target });
+        if (input.status === "awaiting_confirmation" && campaign.state !== "planning") {
+          notify(campaign.ownerId, `${campaign.name}: audience & offer pack + plan await your confirmation in Campaign box (live)`, campaign.id);
+        }
+      }
+
+      // Real checklist → studio assets (decision + production status per asset).
+      const manifestByAsset = new Map(
+        (input.manifest?.assets ?? []).map((a) => [a.asset_id, a]),
+      );
+      const fresh: Asset[] = [];
+      input.checklist.forEach((item) => {
+        const id = `${campaign.id}-${item.assetId}`;
+        const packaged = manifestByAsset.get(item.assetId);
+        const patch: Partial<Asset> = {
+          state: BOX_ASSET_STATE[item.status] ?? "planned",
+          disposition: (item.decision.charAt(0).toUpperCase() + item.decision.slice(1)) as Asset["disposition"],
+          version: packaged ? `v${packaged.version}` : item.status === "planned" ? "planned" : "v1",
+          hash: packaged ? `${packaged.sha256.slice(0, 4)}…${packaged.sha256.slice(4, 8)}` : "pending",
+        };
+        const existing = state.assets.find((a) => a.id === id);
+        const changed = existing && (
+          existing.state !== patch.state || existing.disposition !== patch.disposition
+          || existing.version !== patch.version || existing.hash !== patch.hash
+        );
+        if (existing && changed) dispatch({ type: "ASSET_PATCH", id, patch });
+        else if (!existing) fresh.push({
+          id, campaignId: campaign.id, name: item.label, assetType: "Word",
+          disposition: patch.disposition ?? "Create", ownerTeam: "Content team",
+          version: patch.version ?? "planned", state: patch.state ?? "planned",
+          claims: 0, hash: patch.hash ?? "pending", versions: [],
+        });
+      });
+      if (fresh.length > 0) dispatch({ type: "ASSETS_ADD", assets: fresh });
+
+      // Real STS records → activity stream (deduped by bridge sequence).
+      const seen = new Set(state.events.map((e) => e.id));
+      input.records.forEach((r) => {
+        const event = boxEventFromSts(r, campaign.id);
+        if (event && !seen.has(event.id)) dispatch({ type: "EVENT", event });
+      });
+    },
+
+    /* Both live confirmations (pack + plan) recorded on the bridge — close the
+       Approvals task and move the journey to production. The content stand-in
+       lives on the campaign page until Agents 3–4 exist. */
+    completeLivePlanConfirm: (taskId) => {
+      const task = state.tasks.find((t) => t.id === taskId);
+      if (!task || task.status === "done") return;
+      const campaign = state.campaigns.find((c) => c.id === task.campaignId);
+      dispatch({ type: "TASK_PATCH", id: taskId, patch: { status: "done", resolution: { decision: "Pack & plan confirmed", byId: state.viewAsId, at: Date.now() } } });
+      record(task.campaignId, "Pack & plan confirmed (live agent)", state.viewAsId);
+      emit({ ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: task.campaignId, activity: "plan_confirmed", summary: `Pack and plan confirmed by ${viewer.name} — recorded by the live agent with identity`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "planning", current: "in_production", reason: "Marketing Lead confirmation recorded by the Campaign-in-a-Box agent" } });
+      notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: assets are in production — confirm content per asset on the campaign page`, task.campaignId);
+      showToast("Pack & plan confirmed — assets in production");
     },
 
     returnBrief: (taskId, note) => {
@@ -522,6 +716,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       showToast(`${person?.name ?? "User"} removed from the workspace`);
     },
   };
+
+  /* Reconciliation: a live campaign left in "planning" with no open plan_confirm
+     task means the studio lost the in-flight continuation (page reload during the
+     1–3 min planning pass). The agent finished on the bridge regardless — poll it
+     and heal: sync the mirror and surface the confirmation task. */
+  const reconciled = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pending = state.campaigns.filter(
+      (c) => c.liveCampaignId && c.state === "planning"
+        && !reconciled.current.has(c.id)
+        && !state.tasks.some((t) => t.campaignId === c.id && t.kind === "plan_confirm" && t.status === "open"),
+    );
+    if (pending.length === 0) return;
+    let cancelled = false;
+    let busy = false;
+    async function check() {
+      if (busy || cancelled) return;
+      busy = true;
+      try {
+        for (const c of pending) {
+          if (reconciled.current.has(c.id)) continue;
+          try {
+            const detail = await liveApi.boxDetail(c.liveCampaignId as string);
+            if (cancelled) return;
+            const records = await liveApi.boxTelemetry();
+            if (cancelled) return;
+            actions.syncLiveBox(buildBoxSync(detail, records));
+            if (detail.summary.status === "awaiting_confirmation") {
+              reconciled.current.add(c.id);
+              addTask({
+                kind: "plan_confirm", campaignId: c.id,
+                title: "Confirm audience & offer pack + plan",
+                detail: `${c.name} · proposed by the LIVE Campaign-in-a-Box agent`,
+                assigneeId: c.ownerId, slaHours: 48, liveCaseId: c.liveCampaignId,
+              });
+              notify(c.ownerId, `${c.name}: the real audience & offer pack and plan are ready for your confirmation`, c.id);
+            } else if (detail.summary.status !== "planning") {
+              reconciled.current.add(c.id); // already past the gate — mirror synced
+            }
+          } catch { /* plan still running or bridge down — try again next tick */ }
+        }
+      } finally { busy = false; }
+    }
+    void check();
+    const timer = window.setInterval(() => void check(), 12000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the pending set
+  }, [state.campaigns, state.tasks]);
 
   const store = useMemo<Store>(() => ({
     state, now, viewer, toast, showToast, traceId, openTrace: setTraceId, actions,

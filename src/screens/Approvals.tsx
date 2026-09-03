@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CaretRight, Check, Clock, FileText, PaperPlaneTilt, Timer, Warning } from "@phosphor-icons/react";
 import { openTasksFor, personById, slaInfo, useStore } from "../store";
 import { briefFraming, fullStamp, stampTime } from "../data";
-import { liveApi } from "../live";
+import { liveApi, type LiveCaseDetail } from "../live";
+import { LivePlanReview } from "../boxPanels";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
 import type { Asset, Campaign, Task } from "../types";
@@ -90,14 +91,33 @@ function TaskDetail({ task }: { task: Task }) {
   if (task.kind === "gaps") return <GapsDetail task={task} />;
   if (task.kind === "review") return <ReviewDetail task={task} />;
 
+  /* Pack + plan proposed by the REAL Campaign-in-a-Box agent: the confirmation
+     gate lives here in Approvals like every other human decision, and is
+     recorded by the agent itself. */
+  if (task.kind === "plan_confirm" && task.liveCaseId) {
+    return (
+      <section className="approval-detail">
+        <div className="approval-detail-head"><div><div className="title-line"><h2>{task.title}</h2><CampaignStateChip state={campaign.state} /></div><p>{campaign.name} · {task.detail}</p></div></div>
+        <div className="gap-body">
+          <LivePlanReview task={task} />
+          <div className="agent-recommendation"><Monogram size="sm">CB</Monogram><div><p className="meta-label">Why this is in front of you</p><p className="gate-why">The live Campaign-in-a-Box agent assembled this pack and plan from the approved brief — sourced intel, grounded proof points, a reuse-scanned checklist and a back-planned calendar. The orchestrator never confirms its own output: your confirmation (or delta) is recorded by the agent with your identity, and starts content production.</p></div></div>
+        </div>
+      </section>
+    );
+  }
+
   /* A brief backed by a REAL agent case: the decision goes through the bridge first
      (identity-stamped human gate in the agent), then the demo journey continues. */
   async function approveLive() {
     if (deciding) return;
     setDeciding(true);
     try {
-      if (task.liveCaseId) await liveApi.decide(task.liveCaseId, "approved", viewer.email);
-      actions.approveBrief(task.id);
+      let liveCampaignId: string | undefined;
+      if (task.liveCaseId) {
+        const outcome = await liveApi.decide(task.liveCaseId, "approved", viewer.email);
+        liveCampaignId = outcome.brief?.campaign_id;
+      }
+      actions.approveBrief(task.id, liveCampaignId);
     } catch (e) {
       showToast(`Live agent gate refused: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -137,7 +157,7 @@ function TaskDetail({ task }: { task: Task }) {
       <div className="approval-detail-head"><div><div className="title-line"><h2>{task.title}</h2><CampaignStateChip state={campaign.state} /></div><p>{campaign.name} · {task.detail}</p></div></div>
       <div className="gap-body">
         {task.kind === "brief_approval"
-          ? <BriefReview campaign={campaign} />
+          ? <BriefReview campaign={campaign} liveCaseId={task.liveCaseId} />
           : <div><p className="meta-label">{c.heading}</p><div className="brief-grid">{briefRows.map(([k, v]) => <div key={k}><small>{k}</small><strong>{v}</strong></div>)}</div></div>}
         {showAssets && <AssetListPanel campaignId={task.campaignId} onOpen={setDocAsset} />}
         <div className="agent-recommendation"><Monogram size="sm">{task.kind === "package_signoff" || task.kind === "grammar_qa" ? "QG" : task.kind === "plan_confirm" ? "CB" : "CI"}</Monogram><div><p className="meta-label">Why this is in front of you</p><p className="gate-why">{c.body}</p></div></div>
@@ -155,9 +175,31 @@ function TaskDetail({ task }: { task: Task }) {
 }
 
 /* The full brief document as the approver sees it: agent framing, every field,
-   provenance (drafted, revised by directive, verified) and the original request. */
-function BriefReview({ campaign }: { campaign: Campaign }) {
+   provenance (drafted, revised by directive, verified) and the original request.
+   For a LIVE case the real agent's brief is loaded from the bridge — per-field
+   provenance, classification, conflicts and the generated .docx — so the
+   Campaign Lead reviews the actual document, not the studio's mirror. */
+
+const LIVE_FIELD_LABELS: Record<string, string> = {
+  objective: "Objective", offer_topic: "Offer or topic", business_unit: "Business unit",
+  vertical: "Vertical", target_segment: "Target segment", budget_flag: "Budget",
+  timeline_start: "Window start", timeline_end: "Window end", owner: "Owner",
+  channels: "Channels",
+};
+
+function BriefReview({ campaign, liveCaseId }: { campaign: Campaign; liveCaseId?: string }) {
   const { state, now, openTrace } = useStore();
+  const [live, setLive] = useState<LiveCaseDetail | null>(null);
+  const [liveUnavailable, setLiveUnavailable] = useState(false);
+  useEffect(() => {
+    if (!liveCaseId) return;
+    let cancelled = false;
+    liveApi.getCase(liveCaseId)
+      .then((d) => { if (!cancelled) setLive(d); })
+      .catch(() => { if (!cancelled) setLiveUnavailable(true); });
+    return () => { cancelled = true; };
+  }, [liveCaseId]);
+
   const events = state.events.filter((e) => e.campaignId === campaign.id);
   const drafted = events.find((e) => e.activity === "draft_brief");
   const validated = events.find((e) => e.activity === "validate_brief");
@@ -166,6 +208,10 @@ function BriefReview({ campaign }: { campaign: Campaign }) {
   const verifier = finalised?.actor.personId ? personById(state, finalised.actor.personId) : undefined;
   const provTrace = finalised ?? drafted ?? validated;
   const requester = personById(state, campaign.requesterId);
+
+  const liveBrief = live?.case.brief ?? null;
+  const docUrl = liveApi.docUrl(live?.summary.doc_ref);
+  const classification = liveBrief?.classification ?? null;
 
   const rows: [string, string][] = [
     ["Objective", campaign.objective],
@@ -184,10 +230,56 @@ function BriefReview({ campaign }: { campaign: Campaign }) {
       <div className="brief-review-doc">
         <p className="doc-kicker">{campaign.bu} · {campaign.vertical || "Vertical not set"}</p>
         <h3 className="brief-review-title">{campaign.name}</h3>
+        {docUrl && (
+          <a className="brief-doc-link" href={docUrl} target="_blank" rel="noreferrer">
+            <FileText size={17} />
+            <span>
+              <strong>Open the agent-generated brief (.docx)</strong>
+              <small>The exact document the agent wrote to the workspace — what you approve is what is filed</small>
+            </span>
+            <CaretRight size={14} />
+          </a>
+        )}
         <p className="brief-framing">{briefFraming(campaign)}</p>
-        <div className="brief-grid">
-          {rows.map(([k, v]) => <div key={k}><small>{k}</small><strong>{v}</strong></div>)}
-        </div>
+        {liveBrief ? (
+          <>
+            <p className="meta-label">Brief v{liveBrief.version} as drafted by the agent · provenance on every field</p>
+            <div className="brief-grid live-fields">
+              {liveBrief.fields
+                .filter((f) => f.name in LIVE_FIELD_LABELS)
+                .map((f) => (
+                  <div key={f.name}>
+                    <small>{LIVE_FIELD_LABELS[f.name]}</small>
+                    <strong>{f.value || "—"}</strong>
+                    <em className="field-provenance">{f.provenance}</em>
+                  </div>
+                ))}
+            </div>
+            {classification && (
+              <p className="brief-classification">
+                Classified by the agent: <strong>{classification.campaign_type.replace(/_/g, " ")}</strong> ·{" "}
+                <strong>{classification.priority}</strong> priority · channels{" "}
+                {classification.channel_mix.join(", ")} · {classification.segment_relevance}
+              </p>
+            )}
+            {(liveBrief.conflicts?.length ?? 0) > 0 && (
+              <p className="brief-conflicts">
+                <Warning size={13} /> The agent flagged {liveBrief.conflicts.length} calendar
+                conflict{liveBrief.conflicts.length > 1 ? "s" : ""}:{" "}
+                {liveBrief.conflicts.map((c) => `${c.conflicting_campaign_id} (${c.rationale})`).join(" · ")}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            {liveCaseId && liveUnavailable && (
+              <p className="brief-live-note">Live document unavailable (agent bridge offline) — showing the studio's mirrored summary. Start the bridge and reopen this task for the full brief.</p>
+            )}
+            <div className="brief-grid">
+              {rows.map(([k, v]) => <div key={k}><small>{k}</small><strong>{v}</strong></div>)}
+            </div>
+          </>
+        )}
       </div>
       <div className="brief-provenance">
         <Monogram size="sm">CI</Monogram>

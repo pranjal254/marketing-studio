@@ -50,6 +50,8 @@ export type Campaign = {
   briefVersion?: string; // v0.x while in draft with the Marketing Lead
   briefAngle?: "balanced" | "executive" | "practical";
   liveCaseId?: string; // set when this campaign is backed by a REAL agent case (bridge)
+  liveCampaignId?: string; // the agent-side campaign id (cmp_…) once the brief is
+  // approved — the key into the REAL Campaign-in-a-Box plan on the bridge
 };
 
 export type AssetState = "planned" | "drafting" | "in_review" | "in_revision" | "content_confirmed" | "approved";

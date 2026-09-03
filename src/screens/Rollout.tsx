@@ -150,11 +150,12 @@ export default function RolloutScreen() {
 
   const gates = useMemo(() => {
     const map = new Map<string, GateInfo>();
-    GATES.forEach((g) => map.set(g.id, computeGate(g, campaign, state)));
+    if (campaign) GATES.forEach((g) => map.set(g.id, computeGate(g, campaign, state)));
     return map;
   }, [campaign, state]);
 
   const { nodes, edges } = useMemo(() => {
+    if (!campaign) return { nodes: [] as Node[], edges: [] as Edge[] };
     // Three-row snake, five chain slots per row. Agents sit on the row line,
     // human gates drop slightly below it, so every handoff to a person reads as a dip.
     const COLS = 5, SLOT_W = 200, ROW_H = 252, GATE_DROP = 62;
@@ -210,6 +211,7 @@ export default function RolloutScreen() {
 
   // Selecting a campaign focuses its live node
   useEffect(() => {
+    if (!campaign) return;
     const liveId = CHAIN.find((id) => {
       const n = nodes.find((x) => x.id === id);
       const s = (n?.data as { status: NodeStatus } | undefined)?.status;
@@ -218,6 +220,20 @@ export default function RolloutScreen() {
     setSelectedId(liveId ?? (campaign.state === "approved_locked" ? "lock" : "s1"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaignId]);
+
+  if (!campaign) {
+    return (
+      <div className="screen-content rollout-screen">
+        <section className="simple-page-header">
+          <div><h1>Agent workflow</h1><p>The live pipeline behind every campaign: agents execute, people hold the gates.</p></div>
+        </section>
+        <div className="empty-panel">
+          <p>No campaigns yet. Start one from <strong>New campaign request</strong> on the home
+          screen — the workflow view lights up as the real agents move it through the nine steps.</p>
+        </div>
+      </div>
+    );
+  }
 
   const cost = campaignCost(state, campaign.id);
   const waitingGate = [...gates.values()].find((g) => g.status === "waiting");

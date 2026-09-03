@@ -3,7 +3,7 @@ import type {
   Notification, Person, Role, Task, TelemetryEvent,
 } from "./types";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /* ---------- People ---------- */
 
@@ -374,156 +374,26 @@ export function seedAssetsFor(campaign: Campaign): Asset[] {
   return [flagship, ...rest];
 }
 
+/* The workspace starts EMPTY: no dummy campaigns, tasks or telemetry. Real
+   campaigns enter through the New Campaign request flow (backed by the live
+   Campaign Identification agent over the dev bridge) and everything downstream
+   builds on those. People/personas stay seeded — they are the login identities. */
 export function buildSeed(): AppState {
   evSeq = 0;
   traceSeq = 100;
-  const now = Date.now();
-  const m = (n: number) => now - n * 60000;
-  const h = (n: number) => now - n * 3600000;
-  const d = (n: number) => now - n * 86400000;
-
-  const campaigns: Campaign[] = [
-    { id: "bc", code: "BC", name: "BC Cloud Momentum", bu: "Business Central", vertical: "Financial Services", campaignType: "Demand generation", objective: "Build cloud migration intent in Financial Services", topic: "BC cloud readiness, a practical path", segment: "Type 3 / Type 4", channels: ["LinkedIn", "Email nurture", "Sales enablement", "Web / service page"], window: { start: "2026-08-04", end: "2026-09-18" }, requesterId: "marcus", ownerId: "rishi", budgetApproved: true, state: "in_review", step: 5 },
-    { id: "ai", code: "AI", name: "AI Readiness for Manufacturing", bu: "Business Central", vertical: "Manufacturing", campaignType: "Executive campaign", objective: "Position LevelShift as the pragmatic AI readiness partner", topic: "AI readiness assessment for manufacturers", segment: "Type 4", channels: ["LinkedIn", "Email nurture", "Event"], window: { start: "2026-07-13", end: "2026-08-28" }, requesterId: "sofia", ownerId: "rishi", budgetApproved: true, state: "awaiting_signoff", step: 9 },
-    { id: "cce", code: "CC", name: "Copilot Cloud Essentials", bu: "Business Central", vertical: "Technology", campaignType: "Demand generation", objective: "Build Copilot adoption pipeline", topic: "Copilot essentials for BC customers", segment: "", channels: ["LinkedIn", "Email nurture"], window: { start: "2026-09-07", end: "2026-10-16" }, requesterId: "rishi", ownerId: "rishi", budgetApproved: false, state: "awaiting_input", step: 1 },
-    { id: "fe", code: "FE", name: "FinServ Executive Event", bu: "Cross-BU", vertical: "Financial Services", campaignType: "Event campaign", objective: "Fill the Q4 FinServ executive roundtable", topic: "Executive roundtable, cloud controls that matter", segment: "Type 4", channels: ["Event", "LinkedIn", "Email nurture"], window: { start: "2026-10-01", end: "2026-11-12" }, requesterId: "rishi", ownerId: "rishi", budgetApproved: true, state: "brief_pending_approval", step: 1 },
-    { id: "w1", code: "W1", name: "BC Wave 1 Enablement", bu: "Business Central", vertical: "Manufacturing", campaignType: "Enablement", objective: "Equip partner sellers for the BC cloud wave", topic: "BC wave 1 seller enablement", segment: "Standard", channels: ["Sales enablement", "Email nurture", "Web / service page"], window: { start: "2026-06-01", end: "2026-07-17" }, requesterId: "sofia", ownerId: "rishi", budgetApproved: true, state: "approved_locked", step: 9 },
-  ];
-
-  const agentVersion = (assetId: string, campaign: Campaign, assetName: string, version: string, ts: number, note: string, agent: AgentKey = "CR"): AssetVersion => ({
-    version, ts, author: { type: "agent", agent }, note, hash: fakeHash(`${assetId}-${version}`), doc: buildDoc(campaign, assetName),
-  });
-
-  const mkAssets = (campaign: Campaign, state: Asset["state"], versionBase: string, draftedAt: number): Asset[] => {
-    const fv = `${versionBase}.3`;
-    const flagship: Asset = { id: `${campaign.id}-a0`, campaignId: campaign.id, name: "Research flagship article", assetType: "Word", disposition: "Create", ownerTeam: "Content team", version: fv, state, claims: 18, hash: fakeHash(`${campaign.id}-a0-${fv}`), versions: [agentVersion(`${campaign.id}-a0`, campaign, "Research flagship article", fv, draftedAt, "Drafted from sourced claims only; reviewer edits consolidated by the Collaboration agent")] };
-    const rest = derivativeNames.map(([name, assetType, claims], i): Asset => {
-      const dv = `${versionBase}.1`;
-      const id = `${campaign.id}-a${i + 1}`;
-      return {
-        id, campaignId: campaign.id, name, assetType,
-        disposition: i === 0 || i === 3 ? "Adapt" : i === 2 ? "Reuse" : "Create",
-        ownerTeam: i < 2 ? "Digital marketing" : i === 3 ? "Sales enablement" : "Content team",
-        version: dv, state, claims, hash: fakeHash(`${id}-${dv}`),
-        versions: [agentVersion(id, campaign, name, dv, draftedAt, "Staged from the confirmed flagship claim inventory in bulk fan-out mode")],
-      };
-    });
-    return [flagship, ...rest];
-  };
-
-  const assets: Asset[] = [
-    ...mkAssets(campaigns[0], "in_review", "v1", d(4)),
-    ...mkAssets(campaigns[1], "approved", "v1", d(11)),
-    ...mkAssets(campaigns[4], "approved", "v2", d(34)),
-  ];
-  // bc: flagship confirmed with a visible iteration history, executive post contested
-  const bcFlagship = assets.find((a) => a.id === "bc-a0")!;
-  bcFlagship.state = "content_confirmed";
-  bcFlagship.versions = [
-    { version: "v1.1", ts: d(7), author: { type: "agent", agent: "CR" }, note: "Drafted from sourced claims only; 18-claim inventory attached", hash: fakeHash("bc-a0-v1.1"), doc: { kicker: flagshipDoc.kicker, title: "Business Central cloud migration: what changes and what stays", body: ["Moving Business Central to the cloud is an infrastructure decision with wide operational impact. This article sets out what changes and what stays.", ...flagshipDoc.paragraphs.slice(1)] } },
-    { version: "v1.2", ts: d(6), author: { type: "agent", agent: "CO" }, note: "Applied 8 tracked edits consolidated from reviewer comments; no sourced claim changed", hash: fakeHash("bc-a0-v1.2"), doc: { kicker: flagshipDoc.kicker, title: flagshipDoc.title, body: [flagshipDoc.paragraphs[0], ...flagshipDoc.paragraphs.slice(1)] } },
-    { version: "v1.3", ts: d(5), author: { type: "human", personId: "jen" }, note: "Editorial confirmation pass by Jen Cook; content confirmed for fan-out", hash: fakeHash("bc-a0-v1.3"), doc: { kicker: flagshipDoc.kicker, title: flagshipDoc.title, body: flagshipDoc.paragraphs } },
-  ];
-  bcFlagship.hash = bcFlagship.versions[2].hash;
-  assets.find((a) => a.id === "bc-a2")!.state = "in_revision";
-
-  const tasks: Task[] = [
-    { id: "t-conflict", kind: "conflict", campaignId: "bc", assetId: "bc-a2", title: "Resolve messaging conflict", detail: "Executive LinkedIn post · reviewers disagree on the opening angle", assigneeId: "rishi", createdAt: h(30), slaHours: 48, remindersSent: 1, escalated: false, status: "open" },
-    { id: "t-gaps", kind: "gaps", campaignId: "cce", title: "Answer brief gap questions", detail: "Copilot Cloud Essentials · 2 open questions", assigneeId: "rishi", createdAt: d(3), slaHours: 48, remindersSent: 2, escalated: false, status: "open" },
-    { id: "t-brief-fe", kind: "brief_approval", campaignId: "fe", title: "Approve campaign brief", detail: "FinServ Executive Event · brief v1.0 validated", assigneeId: "marcus", createdAt: h(20), slaHours: 48, remindersSent: 0, escalated: false, status: "open" },
-    { id: "t-signoff-ai", kind: "package_signoff", campaignId: "ai", title: "Sign off campaign package", detail: "AI Readiness for Manufacturing · 9 assets, 42 checks passed", assigneeId: "sofia", createdAt: h(26), slaHours: 48, remindersSent: 1, escalated: false, status: "open" },
-    { id: "t-rev-battle", kind: "review", campaignId: "bc", assetId: "bc-a4", title: "Review sales battle card", detail: "Editorial pass on the adapted battle card", assigneeId: "tom", createdAt: h(10), slaHours: 24, remindersSent: 1, escalated: false, status: "open" },
-    { id: "t-rev-community", kind: "review", campaignId: "bc", assetId: "bc-a7", title: "Review community draft", detail: "Message-fit check before staging", assigneeId: "jen", createdAt: h(22), slaHours: 24, remindersSent: 2, escalated: false, status: "open" },
-    { id: "t-rev-onepager", kind: "review", campaignId: "bc", assetId: "bc-a5", title: "Review executive one-pager", detail: "Editorial pass, currently stalled", assigneeId: "marcus", createdAt: h(52), slaHours: 24, remindersSent: 2, escalated: true, status: "open" },
-  ];
-
-  /* ----- Events (newest built last; store keeps chronological order) ----- */
-  const events: TelemetryEvent[] = [];
-  const push = (e: EvInput) => events.push(makeEvent(e));
-
-  // W1 (completed campaign, condensed history)
-  const w1t = `tr_w1`;
-  push({ ts: d(46), agent: "CI", campaignId: "w1", activity: "validate_brief", summary: "Brief validated, 9 of 9 required fields", trace: w1t, tokens: { input: 3200, output: 900 }, cost: 0.04, llm: 3900, sources: ["Intake form", "Quarterly plan Q2"] });
-  push({ ts: d(45), agent: "studio", campaignId: "w1", activity: "brief_approved", summary: "Brief approved by Sofia Reyes", trace: w1t, actor: { type: "human", personId: "sofia" }, state: { previous: "brief_pending_approval", current: "planning", reason: "BU Campaign Lead approval recorded" }, system: false });
-  push({ ts: d(43), agent: "CB", campaignId: "w1", activity: "plan_campaign", summary: "Audience pack, asset checklist and workspace created", tokens: { input: 21000, output: 6100 }, cost: 0.61, llm: 41000, sources: ["OneDrive intel library", "SemRush"] });
-  push({ ts: d(38), agent: "CR", campaignId: "w1", activity: "draft_flagship", summary: "Flagship drafted with 18 sourced claims", tokens: { input: 26000, output: 14800 }, cost: 1.72, llm: 92000, sources: ["Claim inventory"] });
-  push({ ts: d(34), agent: "CR", campaignId: "w1", activity: "fan_out", summary: "8 channel derivatives staged in bulk mode", tokens: { input: 30000, output: 20800 }, cost: 1.31, llm: 76000 });
-  push({ ts: d(30), agent: "CO", campaignId: "w1", activity: "consolidate_reviews", summary: "22 comments consolidated into 11 tracked edits", tokens: { input: 12800, output: 4100 }, cost: 0.41, llm: 24000, sources: ["Word comments"] });
-  push({ ts: d(28), agent: "PK", campaignId: "w1", activity: "assemble_manifest", summary: "Manifest assembled, 9 of 9 assets, hashes computed", state: { previous: "in_review", current: "packaged_pending_compliance", reason: "All checklist assets content-confirmed" } });
-  push({ ts: d(27), agent: "QG", campaignId: "w1", activity: "compliance_pass", summary: "42 rules passed, 0 blocking findings", tokens: { input: 9800, output: 2100 }, cost: 0.31, llm: 14000 });
-  push({ ts: d(26), agent: "studio", campaignId: "w1", activity: "package_signed_off", summary: "Package signed off by Sofia Reyes and locked read-only", actor: { type: "human", personId: "sofia" }, state: { previous: "awaiting_signoff", current: "approved_locked", reason: "Final human sign-off recorded, versions locked in OneDrive" }, system: false });
-
-  // AI Readiness (at sign-off)
-  push({ ts: d(20), agent: "CI", campaignId: "ai", activity: "validate_brief", summary: "Brief validated and classified as executive campaign", tokens: { input: 3100, output: 850 }, cost: 0.05, llm: 4100, sources: ["Intake form"] });
-  push({ ts: d(19), agent: "studio", campaignId: "ai", activity: "brief_approved", summary: "Brief approved by Marcus Webb", actor: { type: "human", personId: "marcus" }, state: { previous: "brief_pending_approval", current: "planning", reason: "BU Campaign Lead approval recorded" }, system: false });
-  push({ ts: d(17), agent: "CB", campaignId: "ai", activity: "plan_campaign", summary: "Audience & offer pack drafted, 3 reusable assets found", tokens: { input: 19800, output: 5400 }, cost: 0.58, llm: 38000, sources: ["OneDrive intel library", "SemRush"] });
-  push({ ts: d(15), agent: "CR", campaignId: "ai", activity: "draft_flagship", summary: "Flagship drafted, 16 sourced claims", tokens: { input: 24000, output: 13900 }, cost: 1.64, llm: 88000 });
-  push({ ts: d(11), agent: "CR", campaignId: "ai", activity: "fan_out", summary: "8 derivatives staged from confirmed flagship", tokens: { input: 28000, output: 19400 }, cost: 1.22, llm: 71000 });
-  push({ ts: d(6), agent: "CO", campaignId: "ai", activity: "consolidate_reviews", summary: "14 comments consolidated, all assets content-confirmed", tokens: { input: 11200, output: 3600 }, cost: 0.38, llm: 21000, sources: ["Word comments", "Status tracker"] });
-  push({ ts: d(2), agent: "PK", campaignId: "ai", activity: "assemble_manifest", summary: "Manifest assembled, 9 assets registered with hashes", state: { previous: "in_review", current: "packaged_pending_compliance", reason: "Completeness diff empty" } });
-  push({ ts: h(34), agent: "QG", campaignId: "ai", activity: "compliance_pass", summary: "42 checks completed, 0 blocking, 1 advisory", tokens: { input: 9200, output: 1900 }, cost: 0.29, llm: 13000, outcome: "flagged", sources: ["Rules pack v3.2", "Brand guidelines"] });
-  push({ ts: h(33), agent: "studio", campaignId: "ai", activity: "grammar_qa_approved", summary: "Final language QA approved by Tom Aldridge", actor: { type: "human", personId: "tom" }, state: { previous: "grammar_qa", current: "awaiting_signoff", reason: "Grammar / Quality Reviewer approval recorded" }, system: false });
-  push({ ts: h(26), agent: "QG", campaignId: "ai", activity: "route_signoff", summary: "Package sign-off routed to Sofia Reyes, due in 2 business days", cost: 0.01 });
-
-  // BC Cloud Momentum (mid-flight)
-  push({ ts: d(13), agent: "CI", campaignId: "bc", activity: "validate_brief", summary: "Brief validated, no duplicates in campaign calendar", tokens: { input: 3300, output: 920 }, cost: 0.05, llm: 4300, sources: ["Intake form", "Quarterly plan Q3"] });
-  push({ ts: d(12), agent: "studio", campaignId: "bc", activity: "brief_approved", summary: "Brief approved by Marcus Webb", actor: { type: "human", personId: "marcus" }, state: { previous: "brief_pending_approval", current: "planning", reason: "BU Campaign Lead approval recorded" }, system: false });
-  push({ ts: d(11), agent: "CB", campaignId: "bc", activity: "pull_intel", summary: "SemRush and intel library scan complete, 41 sources indexed", tokens: { input: 8800, output: 2100 }, cost: 0.18, llm: 16000, api: 5200, sources: ["SemRush", "OneDrive intel library"] });
-  push({ ts: d(10), agent: "CB", campaignId: "bc", activity: "plan_campaign", summary: "Audience pack confirmed-ready, 9-asset checklist, workspace created", tokens: { input: 20400, output: 5800 }, cost: 0.49, llm: 39000, sources: ["Brief v1.2", "Workspace template v2.0"] });
-  push({ ts: d(9), agent: "studio", campaignId: "bc", activity: "plan_confirmed", summary: "Plan, owners and dates confirmed by Rishi Patel", actor: { type: "human", personId: "rishi" }, state: { previous: "planning", current: "in_production", reason: "Marketing Lead confirmation recorded" }, system: false });
-  push({ ts: d(7), agent: "CR", campaignId: "bc", activity: "draft_flagship", summary: "Flagship drafted with 18 sourced claims", tokens: { input: 26000, output: 15200 }, cost: 1.78, llm: 96000, assetId: "bc-a0", sources: ["Claim inventory", "LevelShift BC delivery overview"] });
-  push({ ts: d(5), agent: "studio", campaignId: "bc", activity: "flagship_confirmed", summary: "Flagship content confirmed by Jen Cook", actor: { type: "human", personId: "jen" }, assetId: "bc-a0", state: { previous: "in_review", current: "content_confirmed", reason: "Human confirmation recorded on v1.3" }, system: false });
-  push({ ts: d(4), agent: "CR", campaignId: "bc", activity: "fan_out", summary: "8 channel derivatives staged in bulk mode, claim lineage attached", tokens: { input: 29000, output: 20100 }, cost: 1.26, llm: 74000, sources: ["Flagship v1.3", "Claim inventory"] });
-  push({ ts: d(2), agent: "CO", campaignId: "bc", activity: "stage_reviews", summary: "Review tasks created for 4 reviewers with document links", cost: 0.06, llm: 2400 });
-  push({ ts: h(31), agent: "CO", campaignId: "bc", activity: "consolidate_reviews", summary: "14 comments consolidated into 8 tracked edits", tokens: { input: 12100, output: 3900 }, cost: 0.4, llm: 23000, sources: ["Word comments", "Workflow plan v1.4"] });
-  push({ ts: h(30), agent: "CO", campaignId: "bc", activity: "conflict_escalation", summary: "Conflicting feedback on executive post surfaced to Marketing Lead", assetId: "bc-a2", outcome: "escalated", cost: 0.02, llm: 1800, state: { previous: "in_review", current: "in_revision", reason: "Reviewer conflict requires human adjudication" }, sources: ["Feedback round 2"] });
-  push({ ts: h(4), agent: "QG", campaignId: "bc", activity: "sla_reminder", summary: "Second reminder sent, community draft review at 90% of its window", cost: 0 });
-  push({ ts: m(8), agent: "QG", campaignId: "bc", activity: "sla_escalation", summary: "Executive one-pager review stalled 1d 4h, escalated with blocking reviewer named", outcome: "escalated", cost: 0 });
-
-  // Copilot Cloud Essentials (awaiting input)
-  push({ ts: d(3), agent: "CI", campaignId: "cce", activity: "validate_brief", summary: "Brief incomplete, 2 gaps found, request sent to requester", tokens: { input: 2900, output: 700 }, cost: 0.04, llm: 3600, outcome: "flagged", state: { previous: "submitted", current: "awaiting_input", reason: "Target segment and budget flag missing, never inferred" }, sources: ["Intake form"] });
-  push({ ts: h(1), agent: "CB", campaignId: "cce", activity: "reuse_scan", summary: "Repository scan found 3 reusable assets for planned checklist", tokens: { input: 6800, output: 1500 }, cost: 0.12, llm: 11000, sources: ["OneDrive content repository"] });
-
-  // FinServ Executive Event (brief pending)
-  push({ ts: h(21), agent: "CI", campaignId: "fe", activity: "validate_brief", summary: "Brief validated, 9 of 9 fields, classified as event campaign", tokens: { input: 3000, output: 800 }, cost: 0.05, llm: 4000, sources: ["Intake form", "Event calendar"] });
-  push({ ts: h(20), agent: "CI", campaignId: "fe", activity: "route_brief_approval", summary: "Brief approval routed to Marcus Webb, due in 2 business days", cost: 0.01 });
-
-  const approvals: ApprovalRecord[] = [
-    { id: "ap1", campaignId: "w1", action: "Brief approved", byId: "sofia", role: "BU Campaign Lead", at: d(45), version: "v1.0", hash: fakeHash("w1-brief") },
-    { id: "ap2", campaignId: "w1", action: "Plan confirmed", byId: "rishi", role: "Marketing Lead", at: d(42), version: "v1.1", hash: fakeHash("w1-plan") },
-    { id: "ap3", campaignId: "w1", action: "Flagship content confirmed", byId: "jen", role: "Content Writer", at: d(33), version: "v2.3", hash: fakeHash("w1-flagship") },
-    { id: "ap4", campaignId: "w1", action: "Grammar QA approved", byId: "tom", role: "Grammar / Quality Reviewer", at: d(27), version: "v2.3", hash: fakeHash("w1-qa") },
-    { id: "ap5", campaignId: "w1", action: "Package signed off & locked", byId: "sofia", role: "BU Campaign Lead", at: d(26), version: "v2.4", hash: fakeHash("w1-package") },
-    { id: "ap6", campaignId: "ai", action: "Brief approved", byId: "marcus", role: "BU Campaign Lead", at: d(19), version: "v1.0", hash: fakeHash("ai-brief") },
-    { id: "ap7", campaignId: "ai", action: "Plan confirmed", byId: "rishi", role: "Marketing Lead", at: d(16), version: "v1.1", hash: fakeHash("ai-plan") },
-    { id: "ap8", campaignId: "ai", action: "Flagship content confirmed", byId: "jen", role: "Content Writer", at: d(12), version: "v1.3", hash: fakeHash("ai-flagship") },
-    { id: "ap9", campaignId: "ai", action: "Grammar QA approved", byId: "tom", role: "Grammar / Quality Reviewer", at: h(33), version: "v1.3", hash: fakeHash("ai-qa") },
-    { id: "ap10", campaignId: "bc", action: "Brief approved", byId: "marcus", role: "BU Campaign Lead", at: d(12), version: "v1.2", hash: fakeHash("bc-brief") },
-    { id: "ap11", campaignId: "bc", action: "Plan confirmed", byId: "rishi", role: "Marketing Lead", at: d(9), version: "v1.4", hash: fakeHash("bc-plan") },
-    { id: "ap12", campaignId: "bc", action: "Flagship content confirmed", byId: "jen", role: "Content Writer", at: d(5), version: "v1.3", hash: fakeHash("bc-flagship") },
-  ];
-
-  const notifications: Notification[] = [
-    { id: "n1", ts: m(8), personId: "rishi", text: "Executive one-pager review stalled, escalated to you with the blocking reviewer named", campaignId: "bc", read: false },
-    { id: "n2", ts: h(30), personId: "rishi", text: "Collaboration agent surfaced a reviewer conflict on the executive LinkedIn post", campaignId: "bc", read: false },
-    { id: "n3", ts: d(3), personId: "rishi", text: "Campaign Identification needs 2 answers on your Copilot Cloud Essentials request", campaignId: "cce", read: false },
-    { id: "n4", ts: h(20), personId: "marcus", text: "FinServ Executive Event brief is ready for your approval", campaignId: "fe", read: false },
-    { id: "n5", ts: h(26), personId: "sofia", text: "AI Readiness package passed all checks and awaits your sign-off", campaignId: "ai", read: false },
-    { id: "n6", ts: h(22), personId: "jen", text: "Reminder: community draft review at 90% of its window", campaignId: "bc", read: false },
-  ];
-
   return {
     schema: SCHEMA_VERSION,
     viewAsId: "rishi",
     people: seedPeople,
-    campaigns,
-    assets,
-    tasks,
-    events,
-    approvals,
-    notifications,
+    campaigns: [],
+    assets: [],
+    tasks: [],
+    events: [],
+    approvals: [],
+    notifications: [],
   };
 }
+
 
 /* Historical weekly autonomy (fleet archive aggregate, weeks 1-12 of the pilot) */
 export const weeklyAutonomy: { week: number; rate: number }[] = [

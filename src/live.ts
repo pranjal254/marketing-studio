@@ -6,6 +6,21 @@
 export const LIVE_API =
   (import.meta.env.VITE_LIVE_API as string | undefined) ?? "http://localhost:8787";
 
+/* Shared secret for a HOSTED bridge (Render): sent as a Bearer header on fetches
+   and as ?token= on browser-navigated URLs (SSE, document downloads, which cannot
+   carry headers). Empty locally — the local bridge runs open. */
+export const LIVE_TOKEN = ((import.meta.env.VITE_LIVE_TOKEN as string | undefined) ?? "").trim();
+
+export function authHeaders(): Record<string, string> {
+  return LIVE_TOKEN ? { Authorization: `Bearer ${LIVE_TOKEN}` } : {};
+}
+
+/* Append the token to a bridge URL the browser navigates to directly. */
+export function tokenized(url: string): string {
+  if (!LIVE_TOKEN) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(LIVE_TOKEN)}`;
+}
+
 /* ---------- payload types (bridge contracts) ---------- */
 
 export type LiveHealth = {
@@ -61,12 +76,96 @@ export type LiveCaseDetail = {
 
 export type StsRecord = Record<string, unknown> & { "bridge.seq"?: number };
 
+/* ---------- Agent 2 (Campaign-in-a-Box) payload types ---------- */
+
+export type BoxProofPoint = { claim: string; source_ref: string; status: string };
+export type BoxPersona = { persona_id: string; title: string; role_pains: string; rationale: string };
+
+export type BoxPack = {
+  version: number; vertical: string; value_proposition: string;
+  segment_applicability: Record<string, string>;
+  personas: BoxPersona[]; differentiators: string[]; proof_points: BoxProofPoint[];
+  ctas: Record<string, string>;
+  messaging_angles: { persona_id: string; angle: string; grounding: string }[];
+  channel_emphasis: Record<string, string>; gaps: string[];
+  intel_mode: string; unverified_share: number;
+  lint_findings: { rule_id: string; severity: string; term: string }[];
+};
+
+export type BoxChecklistItem = {
+  asset_id: string; asset_type: string; label: string; decision: string;
+  decision_rationale: string; reuse_ref: string | null; reuse_check_pending: boolean;
+  status: string; candidates_evaluated: { asset_ref: string; fitness_score: number }[];
+};
+
+export type BoxWorkflowPlan = {
+  version: number; window_start: string; window_end: string;
+  entries: { asset_id: string; draft_due: string; confirm_due: string; review_gate: string; constraint_chain: string }[];
+  feasible: boolean; infeasibility: { reasons: string[]; trade_offs: string[] } | null;
+  capacity_note: string;
+};
+
+export type BoxManifest = {
+  manifest_id: string; version: number; status: string;
+  assets: { asset_id: string; canonical_name: string; sha256: string; version: number }[];
+};
+
+export type BoxSummary = {
+  campaign_id: string; status: string; pack_version: number | null; plan_version: number | null;
+  manifest_version: number; confirmations: Record<string, boolean>; escalations: string[];
+  folder: string | null; trace_id: string | null; reopened_assets: string[];
+};
+
+export type BoxDetail = {
+  summary: BoxSummary;
+  case: { folder?: string; pack_doc_ref?: string; tracker_ref?: string };
+  pack: BoxPack | null;
+  checklist: { items: BoxChecklistItem[]; search_performed: boolean } | null;
+  outlines: { asset_id: string; title: string; sections: { heading: string }[] }[];
+  plan: BoxWorkflowPlan | null;
+  manifest: BoxManifest | null;
+  completeness_report: {
+    diff: { missing: string[]; extra: string[]; version_mismatch: string[] };
+    missing_confirmations: string[];
+  } | null;
+  registered_assets: { asset_id: string; version: number; status: string }[];
+};
+
+/* The REAL Campaign-in-a-Box run, shaped for the studio store's mirror. */
+export type BoxSyncInput = {
+  liveCampaignId: string;
+  status: string;
+  checklist: { assetId: string; label: string; decision: string; status: string }[];
+  manifest: { version: number; assets: { asset_id: string; sha256: string; version: number }[] } | null;
+  records: StsRecord[];
+};
+
+export function buildBoxSync(detail: BoxDetail, records: StsRecord[]): BoxSyncInput {
+  return {
+    liveCampaignId: detail.summary.campaign_id,
+    status: detail.summary.status,
+    checklist: (detail.checklist?.items ?? []).map((i) => ({
+      assetId: i.asset_id, label: i.label, decision: i.decision, status: i.status,
+    })),
+    manifest: detail.manifest
+      ? {
+          version: detail.manifest.version,
+          assets: detail.manifest.assets.map((a) => ({ asset_id: a.asset_id, sha256: a.sha256, version: a.version })),
+        }
+      : null,
+    records: records.filter(
+      (r) => r["shiftai.case.id"] === detail.summary.campaign_id
+        && r["shiftai.agent.id"] === "campaign_in_a_box",
+    ),
+  };
+}
+
 /* ---------- fetch ---------- */
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${LIVE_API}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -120,8 +219,62 @@ export const liveApi = {
   docUrl: (docRef: string | null | undefined): string | null => {
     if (!docRef) return null;
     const name = docRef.split(/[\\/]/).pop();
-    return name ? `${LIVE_API}/api/documents/${name}` : null;
+    return name ? tokenized(`${LIVE_API}/api/documents/${name}`) : null;
   },
+
+  /* ---------- Agent 2: Campaign-in-a-Box ---------- */
+
+  boxPlan: (campaignId: string, actorId: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/plan`, {
+      method: "POST",
+      body: JSON.stringify({ actor_id: actorId }),
+    }),
+
+  boxDetail: (campaignId: string) => call<BoxDetail>(`/api/box/campaigns/${campaignId}`),
+
+  boxConfirm: (
+    campaignId: string, kind: "pack" | "plan", actorId: string,
+    deltas?: Record<string, unknown>,
+  ) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({
+        kind, decision: deltas ? "modified" : "confirmed", actor_id: actorId,
+        deltas: deltas ?? null,
+      }),
+    }),
+
+  boxConfirmAsset: (campaignId: string, assetId: string, actorId: string) =>
+    call<{ asset_id: string; version: number }>(
+      `/api/box/campaigns/${campaignId}/assets/${assetId}/confirm`,
+      { method: "POST", body: JSON.stringify({ actor_id: actorId, claim_refs: [] }) },
+    ),
+
+  boxPackage: (campaignId: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/package`, {
+      method: "POST", body: "{}",
+    }),
+
+  boxReopen: (campaignId: string, assetIds: string[], actorId: string) =>
+    call<{ status: string }>(`/api/box/campaigns/${campaignId}/reopen`, {
+      method: "POST",
+      body: JSON.stringify({ asset_ids: assetIds, actor_id: actorId }),
+    }),
+
+  boxTelemetry: () => call<StsRecord[]>("/api/telemetry?limit=1000"),
+
+  boxDocUrl: (folder: string | null | undefined, absoluteRef: string | null | undefined): string | null => {
+    if (!folder || !absoluteRef) return null;
+    const name = absoluteRef.split(/[\\/]/).pop();
+    return name
+      ? tokenized(`${LIVE_API}/api/box/documents?path=${encodeURIComponent(`${folder}/${name}`)}`)
+      : null;
+  },
+
+  boxSnapshotUrl: (folder: string | null | undefined, canonicalName: string): string | null =>
+    folder
+      ? tokenized(`${LIVE_API}/api/box/documents?path=${encodeURIComponent(`${folder}/final/${canonicalName}`)}`)
+      : null,
 };
 
 /* ---------- value mapping: agent slugs <-> studio labels ---------- */
