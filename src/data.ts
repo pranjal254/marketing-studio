@@ -7,15 +7,17 @@ export const SCHEMA_VERSION = 7;
 
 /* ---------- People ---------- */
 
+/* The shipped roster every visitor gets (studio accounts are seeded here, not in a
+   DB — login is a client-side demo gate; SSO replaces it in production). Internal
+   ids (rishi/marcus/jen/tom) are kept stable across identity changes because the
+   demo wiring references them directly, so only name/email/role/status are edited. */
 export const seedPeople: Person[] = [
   { id: "aicoe", name: "AiCoE Admin", initials: "AI", role: "AiCoE Admin", email: "aicoe@levelshift.com", status: "Active", lastActive: "Now" },
-  { id: "rishi", name: "Rishi Patel", initials: "RP", role: "Marketing Lead", email: "rishi.patel@levelshift.com", status: "Active", lastActive: "Now" },
-  { id: "marcus", name: "Marcus Webb", initials: "MW", role: "BU Campaign Lead", email: "marcus.webb@levelshift.com", status: "Active", lastActive: "1 hour ago" },
-  { id: "sofia", name: "Sofia Reyes", initials: "SR", role: "BU Campaign Lead", email: "sofia.reyes@levelshift.com", status: "Active", lastActive: "Yesterday" },
+  { id: "marcus", name: "Ramya Srinivasan", initials: "RS", role: "BU Campaign Lead", email: "ramya_s4@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "jen", name: "Jen Cook", initials: "JC", role: "Content Writer", email: "jen.cook@levelshift.com", status: "Active", lastActive: "12 minutes ago" },
   { id: "tom", name: "Tom Aldridge", initials: "TA", role: "Grammar / Quality Reviewer", email: "tom.aldridge@levelshift.com", status: "Active", lastActive: "2 days ago" },
-  { id: "dan", name: "Dan Okafor", initials: "DO", role: "AiCoE Admin", email: "dan.okafor@levelshift.com", status: "Active", lastActive: "3 hours ago" },
-  { id: "leah", name: "Leah Novak", initials: "LN", role: "Viewer", email: "leah.novak@levelshift.com", status: "Invited", lastActive: "Invite sent" },
+  { id: "leah", name: "Leah Novak", initials: "LN", role: "Viewer", email: "leah.novak@levelshift.com", status: "Active", lastActive: "Now" },
+  { id: "rishi", name: "Marketing Admin", initials: "MA", role: "Marketing Lead", email: "marketing@levelshift.com", status: "Invited", lastActive: "Invite sent" },
 ];
 
 export const roleTypes: { name: Role; gate: string; description: string }[] = [
