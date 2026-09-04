@@ -166,6 +166,44 @@ export type RepurposeDetail = {
   model: string;
 };
 
+/* ---------- Agent 4 (Collaboration & Iteration) payload types ---------- */
+
+export type ReviewFeedback = {
+  feedback_id: string; reviewer_id: string; reviewer_role: string;
+  section: string; text: string; status: "open" | "consolidated";
+  round: number | null; created_at: string;
+};
+
+export type ReviewResolution = { feedback_id: string; outcome: string; note: string };
+
+export type ReviewRoundInfo = {
+  round: number; edit_summary: string; resolutions: ReviewResolution[];
+  marker_violations: string[]; new_version: number | null;
+  structural_instruction: string | null; conflicts: string[]; created_at: string;
+};
+
+export type ReviewConflict = {
+  conflict_id: string; section: string; status: "open" | "resolved";
+  positions: { reviewer_id: string; reviewer_role: string; quote: string }[];
+  resolution: { decision: string; actor_id: string; at: string } | null;
+};
+
+export type ReviewAssetState = {
+  asset_id: string; asset_type: string; review_gate: string;
+  reviewers: { role: string; focus: string }[]; due: string;
+  status: "in_review" | "in_revision" | "awaiting_conflict_resolution" | "content_confirmed";
+  rounds: number; draft_version: number;
+  confirmed_by: string | null; confirmed_at: string | null;
+  reminders_sent: number; escalated: boolean;
+};
+
+export type ReviewAsset = {
+  state: ReviewAssetState; feedback: ReviewFeedback[];
+  rounds: ReviewRoundInfo[]; conflicts: ReviewConflict[];
+};
+
+export type ReviewDetail = { assets: ReviewAsset[] };
+
 /* The REAL Campaign-in-a-Box run, shaped for the studio store's mirror. */
 export type BoxSyncInput = {
   liveCampaignId: string;
@@ -191,7 +229,8 @@ export function buildBoxSync(detail: BoxDetail, records: StsRecord[]): BoxSyncIn
     records: records.filter(
       (r) => r["shiftai.case.id"] === detail.summary.campaign_id
         && (r["shiftai.agent.id"] === "campaign_in_a_box"
-          || r["shiftai.agent.id"] === "content_repurposing"),
+          || r["shiftai.agent.id"] === "content_repurposing"
+          || r["shiftai.agent.id"] === "collaboration_iteration"),
     ),
   };
 }
@@ -337,6 +376,37 @@ export const liveApi = {
   /* Draft/claim-map download by workspace-relative path (from RepurposeDraft.file_rel). */
   boxDraftUrl: (rel: string | null | undefined): string | null =>
     rel ? tokenized(`${LIVE_API}/api/box/documents?path=${encodeURIComponent(rel)}`) : null,
+
+  /* ---------- Agent 4: Collaboration & Iteration ---------- */
+
+  boxReview: (campaignId: string) =>
+    call<ReviewDetail>(`/api/box/campaigns/${campaignId}/review`),
+
+  boxFeedback: (
+    campaignId: string, assetId: string,
+    reviewerId: string, reviewerRole: string, section: string, text: string,
+  ) =>
+    call<ReviewFeedback>(`/api/box/campaigns/${campaignId}/assets/${assetId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({
+        reviewer_id: reviewerId, reviewer_role: reviewerRole, section, text,
+      }),
+    }),
+
+  boxFeedbackComplete: (campaignId: string, assetId: string, actorId: string) =>
+    call<{ status: string }>(
+      `/api/box/campaigns/${campaignId}/assets/${assetId}/feedback-complete`,
+      { method: "POST", body: JSON.stringify({ actor_id: actorId }) },
+    ),
+
+  boxResolveConflict: (
+    campaignId: string, assetId: string, conflictId: string,
+    decision: string, actorId: string,
+  ) =>
+    call<ReviewConflict>(
+      `/api/box/campaigns/${campaignId}/assets/${assetId}/conflicts/${conflictId}/resolve`,
+      { method: "POST", body: JSON.stringify({ decision, actor_id: actorId }) },
+    ),
 
   boxDocUrl: (folder: string | null | undefined, absoluteRef: string | null | undefined): string | null => {
     if (!folder || !absoluteRef) return null;

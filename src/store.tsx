@@ -122,6 +122,8 @@ function boxEventSummary(r: Record<string, unknown>): string {
       if (what === "flagship_draft") return "Flagship drafted from the approved outline (sourced claims only)";
       if (what === "claim_inventory") return "Claim inventory extracted from the confirmed flagship (verbatim-verified)";
       if (what.startsWith("derivative:")) return `Channel derivative drafted: ${what.slice(11).replace(/_/g, " ")}`;
+      if (what === "consolidate_feedback") return "Reviewer feedback consolidated — de-duplicated, classified, conflicts held";
+      if (what === "apply_textual_edits") return "Agreed textual edits applied as a new tracked version";
       return `Decision: ${what || "abstained"}`;
     }
     case "case_escalated": return `Escalated to ${r["shiftai.escalation.routed_to"]}: ${r["shiftai.learn.reason_code"]}`;
@@ -130,6 +132,9 @@ function boxEventSummary(r: Record<string, unknown>): string {
       if (cls === "route_for_confirmation") return "Pack + plan routed to the Marketing Lead for confirmation";
       if (cls === "register_package_manifest") return "Campaign-in-a-Box manifest registered (hashed, pending compliance)";
       if (cls === "stage_draft") return `Draft staged in the campaign workspace: ${r["shiftai.draft.asset_id"] ?? "asset"} v${r["shiftai.draft.version"] ?? ""}`;
+      if (cls === "assign_reviewers") return `Reviewers assigned from the workflow plan (due ${r["shiftai.review.due"] ?? "—"})`;
+      if (cls === "stage_revision") return `Revised version staged for re-review (v${r["shiftai.draft.version"] ?? ""})`;
+      if (cls === "send_review_reminder") return "Review reminder sent (stale-asset sweep)";
       return cls;
     }
     case "human_gate": return `Human gate: ${r["shiftai.hitl.decision"]} by ${r["shiftai.hitl.actor.role"]}`;
@@ -151,14 +156,16 @@ function boxEventFromSts(
   const tokensIn = r["gen_ai.usage.input_tokens"];
   const cost = r["shiftai.cost.scope"] === "span_incremental" && typeof r["shiftai.cost.amount"] === "number"
     ? (r["shiftai.cost.amount"] as number) : 0;
-  const isRepurposer = r["shiftai.agent.id"] === "content_repurposing";
+  const liveAgent = String(r["shiftai.agent.id"] ?? "");
+  const agentKey = liveAgent === "content_repurposing" ? "CR"
+    : liveAgent === "collaboration_iteration" ? "CO" : "CB";
   return {
     id: `evb_${seq}`,
     ts: Date.parse(String(r["shiftai.timestamp"])) || Date.now(),
     trace_id: String(r["shiftai.trace.id"] ?? ""),
     run_id: String(r["shiftai.run.id"] ?? `run_b${seq}`),
     span_id: String(r["shiftai.span.id"] ?? `sp_b${seq}`),
-    agent: isRepurposer ? "CR" : "CB",
+    agent: agentKey,
     campaignId,
     activity: type === "tool_execution" ? String(r["gen_ai.tool.name"] ?? type) : type,
     summary: boxEventSummary(r),
@@ -171,9 +178,11 @@ function boxEventFromSts(
     cost_usd: cost,
     timing: { llm_ms: type === "decision_made" ? dur : 0, api_ms: type === "tool_execution" ? dur : 0, queue_ms: 0, total_ms: dur },
     outcome: type === "case_escalated" ? "escalated" : type === "error" ? "blocked" : "success",
-    sources: [isRepurposer
-      ? "Live STS record (Content Repurposing)"
-      : "Live STS record (Campaign-in-a-Box)"],
+    sources: [
+      agentKey === "CR" ? "Live STS record (Content Repurposing)"
+        : agentKey === "CO" ? "Live STS record (Collaboration & Iteration)"
+          : "Live STS record (Campaign-in-a-Box)",
+    ],
     systemExecuted: !human,
   };
 }
@@ -208,6 +217,9 @@ type Store = {
     syncLiveBox: (input: SyncLiveBoxInput) => void;
     completeLivePlanConfirm: (taskId: string) => void;
     confirmPlan: (taskId: string) => void;
+    staffWriters: (campaignId: string, writerIds: string[]) => void;
+    ensureFlagshipTask: (campaignId: string) => void;
+    confirmFlagshipContent: (campaignId: string, taskId?: string) => Promise<void>;
     decideConflict: (taskId: string, decision: "recommended" | "operational" | "returned", note?: string) => void;
     completeReview: (taskId: string) => void;
     requestChanges: (taskId: string, aspects: string[], note: string) => void;
@@ -577,7 +589,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "TASK_PATCH", id: taskId, patch: { status: "done", resolution: { decision: "Pack & plan confirmed", byId: state.viewAsId, at: Date.now() } } });
       record(task.campaignId, "Pack & plan confirmed (live agent)", state.viewAsId);
       emit({ ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: task.campaignId, activity: "plan_confirmed", summary: `Pack and plan confirmed by ${viewer.name} — recorded by the live agent with identity`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "planning", current: "in_production", reason: "Marketing Lead confirmation recorded by the Campaign-in-a-Box agent" } });
-      notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: assets are in production — confirm content per asset on the campaign page`, task.campaignId);
+      notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: assets are in production — the flagship goes to a Content Writer for content confirmation`, task.campaignId);
+      // The flagship content-confirm gate belongs to the Content Writers — raise the
+      // shared task now so it sits in their queue while the agent drafts.
+      actions.ensureFlagshipTask(task.campaignId);
       showToast("Pack & plan confirmed — assets in production");
     },
 
@@ -614,6 +629,80 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         notify("jen", "A new flagship draft is staged for your editorial confirmation", task.campaignId);
       });
       showToast("Plan confirmed, content drafting started");
+    },
+
+    /* Marketing Lead staffs the campaign's Content Writers. Empty = the whole
+       active-writer pool (default). Re-targets any open flagship_confirm task so the
+       queue reflects the new staffing immediately. */
+    staffWriters: (campaignId, writerIds) => {
+      const campaign = state.campaigns.find((c) => c.id === campaignId);
+      if (!campaign) return;
+      dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch: { writerIds } });
+      const eligibleIds = writerIds.length > 0
+        ? writerIds
+        : state.people.filter((p) => p.role === "Content Writer" && p.status === "Active").map((p) => p.id);
+      state.tasks
+        .filter((t) => t.campaignId === campaignId && t.kind === "flagship_confirm" && t.status === "open" && !t.assigneeId)
+        .forEach((t) => dispatch({ type: "TASK_PATCH", id: t.id, patch: { eligibleIds } }));
+      const names = eligibleIds.map((id) => state.people.find((p) => p.id === id)?.name.split(" ")[0]).filter(Boolean).join(", ");
+      showToast(writerIds.length > 0 ? `Writers set: ${names}` : "Writers reset to the full pool");
+    },
+
+    /* Idempotent: surface the flagship content-confirm gate as a SHARED task in the
+       staffed writers' Approvals queues. No-op if one is already open. The action
+       itself (confirmFlagshipContent) is recorded by the live agent with identity. */
+    ensureFlagshipTask: (campaignId) => {
+      const campaign = state.campaigns.find((c) => c.id === campaignId);
+      if (!campaign) return;
+      const exists = state.tasks.some(
+        (t) => t.campaignId === campaignId && t.kind === "flagship_confirm" && t.status === "open",
+      );
+      if (exists) return;
+      const writers = effectiveWriters(state, campaign);
+      addTask({
+        kind: "flagship_confirm", campaignId,
+        title: "Confirm flagship content",
+        detail: `${campaign.name} · flagship staged — confirm before the 8-channel fan-out`,
+        assigneeId: "", eligibleRole: "Content Writer",
+        eligibleIds: writers.map((p) => p.id),
+        slaHours: 24, liveCaseId: campaign.liveCampaignId,
+      });
+      writers.forEach((w) => notify(w.id, `${campaign.name}: a flagship draft is staged for your content confirmation`, campaignId));
+    },
+
+    /* The one live flagship content-confirm path, shared by the Approvals gate and
+       the Content production tab. Records the human gate on the bridge (identity +
+       role), claims & closes the shared task, then unlocks the derivative fan-out. */
+    confirmFlagshipContent: async (campaignId, taskId) => {
+      const campaign = state.campaigns.find((c) => c.id === campaignId);
+      const boxId = campaign?.liveCampaignId;
+      if (!campaign || !boxId) { showToast("No live campaign to confirm"); return; }
+      const task = taskId
+        ? state.tasks.find((t) => t.id === taskId)
+        : state.tasks.find((t) => t.campaignId === campaignId && t.kind === "flagship_confirm" && t.status === "open");
+      try {
+        await liveApi.boxFlagshipConfirm(boxId, viewer.email, viewer.role);
+      } catch (e) {
+        showToast(`Live agent gate refused: ${e instanceof Error ? e.message : e}`);
+        return;
+      }
+      if (task && task.status === "open") {
+        // Claim on action: the shared task now belongs to whoever confirmed it, and
+        // is closed — it drops out of the other writers' queues.
+        dispatch({ type: "TASK_PATCH", id: task.id, patch: { status: "done", assigneeId: viewer.id, resolution: { decision: "Flagship content confirmed", byId: viewer.id, at: Date.now() } } });
+      }
+      record(campaignId, "Flagship content confirmed", viewer.id);
+      emit({ ts: Date.now(), trace: uid("tr"), agent: "CO", campaignId, activity: "flagship_confirmed", summary: `Flagship content confirmed by ${viewer.name} — derivative fan-out unlocked`, actor: { type: "human", personId: viewer.id }, system: false, cost: 0 });
+      showToast("Flagship content-confirmed — derivative fan-out running");
+      try {
+        await liveApi.boxFanout(boxId);
+      } catch (e) {
+        showToast(`Fan-out: ${e instanceof Error ? e.message : e}`);
+      }
+      try {
+        const d = await liveApi.boxDetail(boxId);
+        actions.syncLiveBox(buildBoxSync(d, await liveApi.boxTelemetry()));
+      } catch { /* mirror only */ }
     },
 
     decideConflict: (taskId, decision, note) => {
@@ -852,8 +941,47 @@ export function campaignById(state: AppState, id: string): Campaign | undefined 
   return state.campaigns.find((c) => c.id === id);
 }
 
+/* A shared (unclaimed) task is actionable by a person when their role matches the
+   task's eligibleRole and — if the task names specific candidates — they are one of
+   them. This is what scopes flagship-confirm to a campaign's staffed writers. */
+export function isEligibleFor(task: Task, person: Person | undefined): boolean {
+  if (!person || !task.eligibleRole) return false;
+  if (person.role !== task.eligibleRole) return false;
+  if (task.eligibleIds && task.eligibleIds.length > 0) return task.eligibleIds.includes(person.id);
+  return true;
+}
+
+/* The Content Writers who may confirm this campaign's flagship: the staffed set if
+   the Marketing Lead has chosen one, otherwise every active Content Writer. */
+export function effectiveWriters(state: AppState, campaign: Campaign): Person[] {
+  const writers = state.people.filter((p) => p.role === "Content Writer" && p.status === "Active");
+  if (campaign.writerIds && campaign.writerIds.length > 0) {
+    const chosen = writers.filter((p) => campaign.writerIds!.includes(p.id));
+    if (chosen.length > 0) return chosen;
+  }
+  return writers;
+}
+
 export function openTasksFor(state: AppState, personId: string): Task[] {
-  return state.tasks.filter((t) => t.status === "open" && t.assigneeId === personId).sort((a, b) => a.createdAt - b.createdAt);
+  const person = state.people.find((p) => p.id === personId);
+  return state.tasks
+    .filter((t) => t.status === "open" && (
+      t.assigneeId === personId || (!t.assigneeId && isEligibleFor(t, person))
+    ))
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/* Who a task is waiting on, for the "Waiting on" surfaces. A claimed task names the
+   person; a shared (unclaimed) task names the eligible role instead. */
+export function assigneeName(state: AppState, task: Task): string {
+  if (task.assigneeId) return personById(state, task.assigneeId)?.name ?? "Unassigned";
+  if (task.eligibleRole === "Content Writer") return "A Content Writer";
+  return task.eligibleRole ? `A ${task.eligibleRole}` : "Unassigned";
+}
+
+export function assigneeShort(state: AppState, task: Task): string {
+  if (task.assigneeId) return personById(state, task.assigneeId)?.name.split(" ")[0] ?? "—";
+  return task.eligibleRole === "Content Writer" ? "A writer" : task.eligibleRole ? `A ${task.eligibleRole}` : "—";
 }
 
 export function campaignCost(state: AppState, campaignId: string): number {

@@ -10,7 +10,7 @@ const taskChipTone = (task: Task): "amber" | "blue" => (task.kind === "conflict"
 
 const kindLabels: Record<Task["kind"], string> = {
   gaps: "Your input", conflict: "Decision", brief_approval: "Approval", plan_confirm: "Confirmation",
-  review: "Review", grammar_qa: "Language QA", package_signoff: "Sign-off",
+  review: "Review", grammar_qa: "Language QA", package_signoff: "Sign-off", flagship_confirm: "Content confirm",
 };
 
 type Tile = { key: string; label: string; value: string; sub: string; formula: string };

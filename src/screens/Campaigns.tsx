@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText } from "@phosphor-icons/react";
-import { campaignCost, openTasksFor, personById, useStore } from "../store";
+import { assigneeName, assigneeShort, campaignCost, effectiveWriters, openTasksFor, personById, useStore } from "../store";
 import { flagshipDoc, fullStamp, journeySteps, phaseLabels, stampTime, toneVars } from "../data";
 import { LiveBoxPackPanel, LiveProductionPanel } from "../boxPanels";
 import { useNav } from "../nav";
-import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
+import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, Menu, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
 import { InlineDots } from "../loaders";
 
@@ -42,7 +42,7 @@ export default function CampaignsScreen() {
               </div>
               <div className="line-col">
                 <small>Waiting on</small>
-                <strong>{open.length === 0 ? (c.state === "approved_locked" ? "Nobody" : "Agents") : personById(state, open[0].assigneeId)?.name.split(" ")[0]}</strong>
+                <strong>{open.length === 0 ? (c.state === "approved_locked" ? "Nobody" : "Agents") : assigneeShort(state, open[0])}</strong>
               </div>
               <div className="line-col">
                 <small>AI cost</small>
@@ -66,6 +66,46 @@ export default function CampaignsScreen() {
         })}
       </section>
     </div>
+  );
+}
+
+/* Marketing Lead staffs the campaign's Content Writers — the pool that may confirm
+   the flagship. Default (no explicit set) is every active writer; the lead can
+   narrow it. Everyone sees who's staffed; only the lead/admin can change it. */
+function WriterStaffing({ campaign }: { campaign: Campaign }) {
+  const { state, viewer, actions } = useStore();
+  const allWriters = state.people.filter((p) => p.role === "Content Writer" && p.status === "Active");
+  const staffed = effectiveWriters(state, campaign);
+  const staffedIds = new Set(staffed.map((p) => p.id));
+  const canEdit = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+  const isPool = !campaign.writerIds || campaign.writerIds.length === 0;
+
+  function toggle(id: string) {
+    const base = isPool ? allWriters.map((w) => w.id) : campaign.writerIds!;
+    const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+    // Never leave zero writers, and collapse "everyone" back to the pool default.
+    actions.staffWriters(campaign.id, next.length === 0 || next.length === allWriters.length ? [] : next);
+  }
+
+  return (
+    <section className="writer-staffing">
+      <div>
+        <p className="meta-label">Content Writers on this campaign</p>
+        <div className="writer-chips">
+          {staffed.map((w) => <Chip key={w.id} tone="neutral">{w.name}</Chip>)}
+          {isPool && <span className="live-note">Default: every active Content Writer — any one of them confirms the flagship.</span>}
+        </div>
+      </div>
+      {canEdit && (
+        <Menu label={<span className="secondary-button">Edit writers <CaretRight size={12} /></span>}>
+          {allWriters.map((w) => (
+            <button key={w.id} onClick={() => toggle(w.id)}>
+              {staffedIds.has(w.id) ? <Check size={13} weight="bold" /> : <span className="check-spacer" aria-hidden="true" />} {w.name}
+            </button>
+          ))}
+        </Menu>
+      )}
+    </section>
   );
 }
 
@@ -95,7 +135,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
       <section className="campaign-summary-strip">
         <div><small>Journey progress</small><strong>{campaign.state === "approved_locked" ? "9 of 9 steps" : `${campaign.step} of 9 steps`}</strong><ProgressSteps active={campaign.state === "approved_locked" ? 9 : campaign.step - 1} /></div>
         <div><small>Content assets</small><strong>{assets.length === 0 ? "Not planned yet" : `${assets.length} registered`}</strong><span>{assets.length > 0 ? "From the Campaign-in-a-Box checklist" : "Checklist arrives at step 3"}</span></div>
-        <div><small>Waiting on</small><strong>{openTasks.length > 0 ? personById(state, openTasks[0].assigneeId)?.name : campaign.state === "approved_locked" ? "Nobody" : <>Agents executing<InlineDots /></>}</strong><span>{openTasks.length > 0 ? openTasks[0].title : campaign.state === "approved_locked" ? "Package locked read-only" : "No human gate open"}</span></div>
+        <div><small>Waiting on</small><strong>{openTasks.length > 0 ? assigneeName(state, openTasks[0]) : campaign.state === "approved_locked" ? "Nobody" : <>Agents executing<InlineDots /></>}</strong><span>{openTasks.length > 0 ? openTasks[0].title : campaign.state === "approved_locked" ? "Package locked read-only" : "No human gate open"}</span></div>
         <div><small>AI cost so far</small><strong>${cost.toFixed(2)}</strong><span>Within $6.00 envelope</span></div>
       </section>
       <div className="tab-bar" role="tablist">
@@ -122,7 +162,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
                         <p>{step.owner}</p>
                         <div className={`gate-line ${active ? "human" : ""}`}>
                           {active && openTasks[0] ? <Avatar initials={personById(state, openTasks[0].assigneeId)?.initials ?? "?"} /> : <span className="gate-icon">{done ? <Check size={12} weight="bold" /> : <Clock size={13} />}</span>}
-                          <span className="gate-text"><small>{active ? "Waiting on" : done ? "Cleared" : "Gate"}</small><strong title={active && openTasks[0] ? personById(state, openTasks[0].assigneeId)?.name : step.gate}>{active && openTasks[0] ? personById(state, openTasks[0].assigneeId)?.name : step.gate}</strong></span>
+                          <span className="gate-text"><small>{active ? "Waiting on" : done ? "Cleared" : "Gate"}</small><strong title={active && openTasks[0] ? assigneeName(state, openTasks[0]) : step.gate}>{active && openTasks[0] ? assigneeName(state, openTasks[0]) : step.gate}</strong></span>
                           {stepEvents.length > 0 && <button className="trace-link" onClick={() => openTrace(stepEvents[0].trace_id)}>Trace</button>}
                         </div>
                       </article>
@@ -178,7 +218,10 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
       )}
 
       {tab === "content" && campaign.liveCampaignId && (
-        <LiveProductionPanel campaign={campaign} />
+        <>
+          <WriterStaffing campaign={campaign} />
+          <LiveProductionPanel campaign={campaign} />
+        </>
       )}
 
       {tab === "content" && flagship && flagship.versions.length > 0 && (() => {

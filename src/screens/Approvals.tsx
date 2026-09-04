@@ -3,7 +3,7 @@ import { CaretRight, Check, Clock, FileText, PaperPlaneTilt, Timer, Warning } fr
 import { openTasksFor, personById, slaInfo, useStore } from "../store";
 import { briefFraming, fullStamp, stampTime } from "../data";
 import { liveApi, type LiveCaseDetail } from "../live";
-import { LivePlanReview } from "../boxPanels";
+import { LiveFlagshipConfirm, LivePlanReview } from "../boxPanels";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
 import type { Asset, Campaign, Task } from "../types";
@@ -19,7 +19,8 @@ export default function ApprovalsScreen() {
     if (nav.taskId) setSelectedId(nav.taskId);
   }, [nav.taskId]);
 
-  const selected = state.tasks.find((t) => t.id === selectedId && t.status === "open" && t.assigneeId === viewer.id) ?? myTasks[0] ?? null;
+  // myTasks already resolves ownership + shared-task eligibility, so select within it.
+  const selected = myTasks.find((t) => t.id === selectedId) ?? myTasks[0] ?? null;
   const reviewWatch = state.tasks.filter((t) => t.status === "open" && t.kind === "review").sort((a, b) => a.createdAt - b.createdAt);
   const canManageSla = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
 
@@ -90,6 +91,18 @@ function TaskDetail({ task }: { task: Task }) {
   if (task.kind === "conflict") return <ConflictDetail task={task} />;
   if (task.kind === "gaps") return <GapsDetail task={task} />;
   if (task.kind === "review") return <ReviewDetail task={task} />;
+
+  /* Flagship content-confirm: the Content Writer's gate (step 04), backed by the
+     real Content Repurposing agent. The live draft + confirm are embedded here so
+     the writer acts from their queue, exactly like the plan-confirm gate. */
+  if (task.kind === "flagship_confirm") {
+    return (
+      <section className="approval-detail">
+        <div className="approval-detail-head"><div><div className="title-line"><h2>{task.title}</h2><CampaignStateChip state={campaign.state} /></div><p>{campaign.name} · {task.detail}</p></div></div>
+        <LiveFlagshipConfirm task={task} />
+      </section>
+    );
+  }
 
   /* Pack + plan proposed by the REAL Campaign-in-a-Box agent: the confirmation
      gate lives here in Approvals like every other human decision, and is

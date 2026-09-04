@@ -43,6 +43,9 @@ export type Campaign = {
   window: { start: string; end: string };
   requesterId: string;
   ownerId: string;
+  writerIds?: string[]; // Content Writers staffed on this campaign (flagship-confirm
+  // pool). Empty/undefined = every active Content Writer, until the Marketing Lead
+  // narrows it on the campaign page.
   budgetApproved: boolean;
   state: CampaignState;
   step: number; // 1..9 journey position
@@ -86,7 +89,7 @@ export type Asset = {
   versions: AssetVersion[]; // oldest first; version/hash above mirror the last entry
 };
 
-export type TaskKind = "conflict" | "gaps" | "brief_approval" | "plan_confirm" | "package_signoff" | "grammar_qa" | "review";
+export type TaskKind = "conflict" | "gaps" | "brief_approval" | "plan_confirm" | "package_signoff" | "grammar_qa" | "review" | "flagship_confirm";
 
 export type Task = {
   id: string;
@@ -95,15 +98,21 @@ export type Task = {
   assetId?: string;
   title: string;
   detail: string;
+  /** The person accountable for this task. Empty string = an unclaimed shared task:
+      anyone matching eligibleRole (and, if set, eligibleIds) may act, and acting
+      claims it. */
   assigneeId: string;
+  eligibleRole?: Role; // shared tasks: which role may act (and therefore see it)
+  eligibleIds?: string[]; // shared tasks: the specific candidate people (e.g. the
+  // campaign's staffed writers); empty/undefined = the whole eligibleRole pool
   createdAt: number;
   slaHours: number;
   remindersSent: 0 | 1 | 2;
   escalated: boolean;
   status: "open" | "done";
   resolution?: { decision: string; byId: string; at: number; note?: string };
-  liveCaseId?: string; // brief_approval tasks backed by a REAL agent case route the
-  // decision through the bridge before the demo journey continues
+  liveCaseId?: string; // brief_approval / flagship_confirm tasks backed by a REAL
+  // agent case route the decision through the bridge before the journey continues
 };
 
 // ShiftAI Telemetry Standard (STS) v1.1 event envelope

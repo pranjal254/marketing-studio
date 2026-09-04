@@ -596,8 +596,11 @@ code { font-family: var(--font-mono); }
 .add-user-actions { display: flex; gap: 8px; }
 .form-error { grid-column: 1 / -1; margin: 0; color: var(--red); font-size: 12.5px; }
 .users-layout { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
-.users-table { border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; overflow: hidden; }
-.users-table-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; padding: 0 14px; background: #f7f7f9; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+/* No overflow clipping here: the row "…" dropdown is position:absolute and must be
+   able to escape the table box, or it renders clipped/behind. Corners stay rounded
+   via the head/last-row radii below. */
+.users-table { border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; }
+.users-table-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; padding: 0 14px; background: #f7f7f9; border-bottom: 1px solid var(--line); border-radius: var(--r-panel) var(--r-panel) 0 0; color: var(--muted); font-size: 12px; }
 .users-table-head span:first-child { color: var(--ink); font-weight: 600; }
 .user-row { display: grid; grid-template-columns: 34px minmax(180px, 1.3fr) 168px 1.1fr 78px 100px 30px; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); }
 .user-row:last-child { border-bottom: 0; }
@@ -1063,6 +1066,9 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .add-user-note code { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
 
 /* Campaign · Content production (live Campaign-in-a-Box) — full-width, responsive */
+.writer-staffing { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; padding: 14px 16px; margin-bottom: 12px; }
+.writer-staffing .writer-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.writer-staffing .check-spacer { width: 13px; display: inline-block; }
 .box-production-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .box-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; }
 @media (max-width: 860px) { .box-assets { grid-template-columns: 1fr; } }
@@ -1083,8 +1089,15 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 @media (min-width: 1100px) { .box-asset.flagship .box-gapnotes, .box-repurpose > .box-gapnotes { grid-template-columns: 1fr 1fr; } }
 .box-asset-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .box-asset-foot .text-link { margin-right: auto; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
-.box-rework { display: flex; gap: 8px; align-items: flex-start; }
+.box-rework { display: flex; gap: 8px; align-items: flex-start; width: 100%; }
 .box-rework textarea { flex: 1; padding: 8px 10px; border: 1px solid #d9d9de; border-radius: var(--r-control); font: inherit; font-size: 12.5px; resize: vertical; }
+.review-thread { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--line-soft); }
+.review-comment { margin: 0; font-size: 12px; color: var(--ink); line-height: 1.5; padding: 6px 10px; background: #f7f7f9; border-radius: 8px; }
+.review-comment strong { font-weight: 600; }
+.review-round { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.55; }
+.review-round strong { color: var(--ink); }
+.conflict-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid #e5c465; border-radius: 8px; padding: 10px 12px; background: #fdf9ee; }
+.conflict-card .secondary-button { align-self: flex-start; }
 .box-packaging { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
 .box-packaging strong { display: block; font-size: 13px; }
 .box-packaging small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; max-width: 560px; }
@@ -1252,8 +1265,14 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 /* ===== Responsiveness: sidebar-open aware layouts ===== */
-.users-table { overflow-x: auto; }
-.user-row, .users-table-head { min-width: 660px; }
+/* Horizontal scroll only in the tablet band where the multi-column row is wider
+   than the content area but hasn't yet collapsed to the mobile layout (≤760px).
+   On desktop the table stays overflow:visible so the row menu isn't clipped; on
+   mobile the row collapses to fit, so neither needs a scrollbar. */
+@media (min-width: 761px) and (max-width: 1024px) {
+  .users-table { overflow-x: auto; }
+  .user-row, .users-table-head { min-width: 620px; }
+}
 @media (max-width: 1560px) {
   .app-shell:not(.is-collapsed) .users-layout { grid-template-columns: 1fr; }
 }

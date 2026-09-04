@@ -11,9 +11,10 @@ import { ArrowSquareOut, CheckCircle, Cube, DownloadSimple, WarningCircle } from
 import {
   buildBoxSync, liveApi, LiveApiError,
   type BoxDetail, type RepurposeDetail, type RepurposeDraft,
+  type ReviewAsset, type ReviewDetail,
 } from "./live";
-import { useStore } from "./store";
-import { BusyButton, Chip } from "./ui";
+import { openTasksFor, useStore } from "./store";
+import { BusyButton, Chip, Monogram } from "./ui";
 import type { Campaign, Task } from "./types";
 
 function useBoxDetail(boxId: string | undefined) {
@@ -267,7 +268,7 @@ function latestByAsset(drafts: RepurposeDraft[]): RepurposeDraft[] {
 }
 
 export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
-  const { actions, viewer, showToast } = useStore();
+  const { state, actions, viewer, showToast } = useStore();
   const { detail, offline, gone, reload } = useBoxDetail(campaign.liveCampaignId);
   /* Which action is in flight (e.g. "confirm:linkedin_posts", "package",
      "flagship", "rework:faq_service_page") — the clicked button shows a spinner,
@@ -275,10 +276,14 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const busy = busyAction !== null;
   const [rp, setRp] = useState<RepurposeDetail | null>(null);
+  const [review, setReview] = useState<ReviewDetail | null>(null);
   const [drafting, setDrafting] = useState(false);
-  const [fanoutRunning, setFanoutRunning] = useState(false);
   const [reworkFor, setReworkFor] = useState<string | null>(null);
   const [reworkText, setReworkText] = useState("");
+  const [commentFor, setCommentFor] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [resolveFor, setResolveFor] = useState<string | null>(null);
+  const [resolveText, setResolveText] = useState("");
   const rpBusy = useRef(false);
 
   const reloadRp = useCallback(async (): Promise<RepurposeDetail | null> => {
@@ -287,6 +292,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
     try {
       const d = await liveApi.boxDrafts(campaign.liveCampaignId);
       setRp(d);
+      try { setReview(await liveApi.boxReview(campaign.liveCampaignId)); } catch { /* optional */ }
       return d;
     } catch {
       return null;
@@ -301,6 +307,16 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
     const timer = window.setInterval(() => void reloadRp(), 12000);
     return () => window.clearInterval(timer);
   }, [reloadRp, gone]);
+
+  useEffect(() => {
+    // Once the agent has staged the flagship, make sure the shared writer gate is
+    // in the Content Writers' Approvals queues (idempotent; also created upstream at
+    // plan-confirm, this heals campaigns confirmed before that path existed).
+    if (campaign.liveCampaignId && rp?.status === "flagship_staged") {
+      actions.ensureFlagshipTask(campaign.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- actions is unstable; keyed on status
+  }, [rp?.status, campaign.id, campaign.liveCampaignId]);
 
   async function run(action: string, fn: () => Promise<unknown>, done: string) {
     if (busy || !campaign.liveCampaignId) return;
@@ -337,6 +353,12 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   const rpDrafts = latestByAsset(rp?.drafts ?? []);
   const flagship = rpDrafts.find((d) => d.kind === "flagship") ?? null;
   const derivatives = rpDrafts.filter((d) => d.kind === "derivative");
+  /* Only a staffed Content Writer may confirm the flagship — the presence of an
+     open flagship_confirm task in the viewer's own queue is the single source of
+     truth for that (openTasksFor already resolves role + staffing eligibility). */
+  const canConfirmFlagship = openTasksFor(state, viewer.id).some(
+    (t) => t.campaignId === campaign.id && t.kind === "flagship_confirm",
+  );
 
   function startFlagship() {
     if (drafting) return;
@@ -347,34 +369,19 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
       .finally(() => { setDrafting(false); void reloadRp(); });
   }
 
+  /* The confirm itself lives in one place (store.confirmFlagshipContent): it records
+     the human gate on the bridge, claims & closes the shared writer task, and runs
+     the fan-out. Here we just drive the button state and refresh the local view. */
   async function confirmFlagship() {
     if (busy || !flagship) return;
     setBusyAction("flagship");
     try {
-      await liveApi.boxFlagshipConfirm(boxId, viewer.email, viewer.role);
-      showToast("Flagship content-confirmed — derivative fan-out running");
-      setFanoutRunning(true);
-      void (async () => {
-        try {
-          await liveApi.boxFanout(boxId);
-        } catch (e) {
-          showToast(`Fan-out: ${e instanceof Error ? e.message : e}`);
-        } finally {
-          setFanoutRunning(false);
-          await reloadRp();
-          const d = await reload();
-          if (d) {
-            try { actions.syncLiveBox(buildBoxSync(d, await liveApi.boxTelemetry())); } catch { /* mirror only */ }
-          }
-        }
-      })();
+      await actions.confirmFlagshipContent(campaign.id);
       await reloadRp();
       const d = await reload();
       if (d) {
         try { actions.syncLiveBox(buildBoxSync(d, await liveApi.boxTelemetry())); } catch { /* mirror only */ }
       }
-    } catch (e) {
-      showToast(`Live agent gate refused: ${e instanceof Error ? e.message : e}`);
     } finally { setBusyAction(null); }
   }
 
@@ -391,9 +398,146 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
     } finally { setBusyAction(null); }
   }
 
+  async function submitComment(assetId: string) {
+    if (busy || !commentText.trim()) return;
+    setBusyAction(`comment:${assetId}`);
+    try {
+      await liveApi.boxFeedback(boxId, assetId, viewer.email, viewer.role, "",
+        commentText.trim());
+      setCommentFor(null); setCommentText("");
+      await reloadRp();
+      showToast("Review comment recorded — run the revision round when reviewers are done");
+    } catch (e) {
+      showToast(`Comment refused: ${e instanceof Error ? e.message : e}`);
+    } finally { setBusyAction(null); }
+  }
+
+  async function runReviewRound(assetId: string) {
+    if (busy) return;
+    setBusyAction(`round:${assetId}`);
+    try {
+      await liveApi.boxFeedbackComplete(boxId, assetId, viewer.email);
+      await reloadRp();
+      showToast("Revision round complete — see the edit summary and any held conflicts");
+    } catch (e) {
+      showToast(`Round refused: ${e instanceof Error ? e.message : e}`);
+    } finally { setBusyAction(null); }
+  }
+
+  async function submitResolve(assetId: string, conflictId: string) {
+    if (busy || !resolveText.trim()) return;
+    setBusyAction(`resolve:${conflictId}`);
+    try {
+      await liveApi.boxResolveConflict(boxId, assetId, conflictId,
+        resolveText.trim(), viewer.email);
+      setResolveFor(null); setResolveText("");
+      await reloadRp();
+      showToast("Conflict resolved — your decision feeds the next revision round");
+    } catch (e) {
+      showToast(`Resolution refused: ${e instanceof Error ? e.message : e}`);
+    } finally { setBusyAction(null); }
+  }
+
+  const isLead = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+
+  function reviewBlock(rv: ReviewAsset) {
+    const assetId = rv.state.asset_id;
+    const openFeedback = rv.feedback.filter((f) => f.status === "open");
+    const openConflicts = rv.conflicts.filter((c) => c.status === "open");
+    const confirmed = rv.state.status === "content_confirmed";
+    return (
+      <div className="review-thread">
+        <p className="meta-label">
+          Review cycle (live Collaboration &amp; Iteration agent) · round {rv.state.rounds}
+          {" · reviewers: "}{rv.state.reviewers.map((r) => r.role).join(" + ") || "—"}
+          {rv.state.due ? ` · due ${rv.state.due}` : ""}
+          {rv.state.escalated ? " · ESCALATED (stale)" : ""}
+        </p>
+        {rv.rounds.map((r) => (
+          <p className="review-round" key={r.round}>
+            <strong>Round {r.round}:</strong>{" "}
+            {r.edit_summary || "no textual edits this round"}
+            {" · "}{r.resolutions.filter((x) => x.outcome === "applied").length} applied
+            {r.resolutions.some((x) => x.outcome === "flagged_sourced_claim")
+              ? " · sourced-claim edit blocked (human-only)" : ""}
+            {r.structural_instruction ? " · structural rework routed to Agent 3" : ""}
+          </p>
+        ))}
+        {openFeedback.map((f) => (
+          <p className="review-comment" key={f.feedback_id}>
+            <strong>{f.reviewer_id}</strong> ({f.reviewer_role}): {f.text}
+          </p>
+        ))}
+        {openConflicts.map((c) => (
+          <div className="conflict-card" key={c.conflict_id}>
+            <p className="live-note">
+              <WarningCircle size={13} /> Conflicting feedback on “{c.section || "the asset"}”
+              — held for the Marketing Lead (the agent never picks a side):
+            </p>
+            {c.positions.map((p, i) => (
+              <p className="review-comment" key={i}>
+                <strong>{p.reviewer_id}</strong> ({p.reviewer_role}): “{p.quote}”
+              </p>
+            ))}
+            {isLead ? (
+              resolveFor === c.conflict_id ? (
+                <div className="box-rework">
+                  <textarea value={resolveText} rows={2}
+                    placeholder="Your decision (recorded with your identity; applied next round)"
+                    onChange={(e) => setResolveText(e.target.value)} />
+                  <BusyButton kind="secondary" busy={busyAction === `resolve:${c.conflict_id}`}
+                    busyLabel="Recording decision…"
+                    disabled={busy || !resolveText.trim()}
+                    onClick={() => void submitResolve(assetId, c.conflict_id)}>
+                    Resolve conflict
+                  </BusyButton>
+                </div>
+              ) : (
+                <button className="secondary-button" disabled={busy}
+                  onClick={() => { setResolveFor(c.conflict_id); setResolveText(""); }}>
+                  Resolve as Marketing Lead
+                </button>
+              )
+            ) : (
+              <p className="box-standin-note">Waiting on the Marketing Lead's decision.</p>
+            )}
+          </div>
+        ))}
+        {!confirmed && (
+          <div className="box-asset-foot">
+            {commentFor === assetId ? (
+              <div className="box-rework">
+                <textarea value={commentText} rows={2}
+                  placeholder="Your review comment (attributed to you)"
+                  onChange={(e) => setCommentText(e.target.value)} />
+                <BusyButton kind="secondary" busy={busyAction === `comment:${assetId}`}
+                  busyLabel="Recording…" disabled={busy || !commentText.trim()}
+                  onClick={() => void submitComment(assetId)}>
+                  Add comment
+                </BusyButton>
+              </div>
+            ) : (
+              <button className="secondary-button" disabled={busy}
+                onClick={() => { setCommentFor(assetId); setCommentText(""); }}>
+                Add review comment
+              </button>
+            )}
+            <BusyButton kind="secondary" busy={busyAction === `round:${assetId}`}
+              busyLabel="Consolidating & revising…"
+              disabled={busy || openFeedback.length === 0 || openConflicts.length > 0}
+              onClick={() => void runReviewRound(assetId)}>
+              Feedback complete — run revision round
+            </BusyButton>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function draftCard(draft: RepurposeDraft) {
     const doc = liveApi.boxDraftUrl(draft.file_rel);
     const withheld = draft.status === "withheld";
+    const rv = review?.assets.find((a) => a.state.asset_id === draft.asset_id);
     const classes = ["box-asset"];
     if (draft.kind === "flagship") classes.push("flagship");
     if (withheld) classes.push("withheld");
@@ -403,6 +547,12 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
           <Chip tone={withheld ? "amber" : "green"}>{withheld ? "withheld" : `v${draft.version}`}</Chip>
           <strong>{draft.title}</strong>
           <Chip tone="neutral">{draft.asset_type.replace(/_/g, " ")}</Chip>
+          {rv && (
+            <Chip tone={rv.state.status === "content_confirmed" ? "green"
+              : rv.state.status === "awaiting_conflict_resolution" ? "amber" : "blue"}>
+              {rv.state.status.replace(/_/g, " ")}
+            </Chip>
+          )}
         </div>
         <p>
           {draft.sections.length} section{draft.sections.length === 1 ? "" : "s"}
@@ -441,10 +591,14 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
             </button>
           )}
           {draft.kind === "flagship" && rpStatus === "flagship_staged" && !withheld && (
-            <BusyButton busy={busyAction === "flagship"} busyLabel="Recording confirmation…"
-              disabled={busy} onClick={() => void confirmFlagship()}>
-              <CheckCircle size={14} /> Confirm flagship content
-            </BusyButton>
+            canConfirmFlagship ? (
+              <BusyButton busy={busyAction === "flagship"} busyLabel="Recording confirmation…"
+                disabled={busy} onClick={() => void confirmFlagship()}>
+                <CheckCircle size={14} /> Confirm flagship content
+              </BusyButton>
+            ) : (
+              <span className="live-note">Awaiting a Content Writer&apos;s confirmation — this gate is theirs.</span>
+            )
           )}
         </div>
         {reworkFor === draft.asset_id && (
@@ -460,6 +614,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
             </BusyButton>
           </div>
         )}
+        {rv && reviewBlock(rv)}
       </article>
     );
   }
@@ -484,8 +639,8 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
               </p>
               <h2>
                 {rpStatus === null && (drafting ? "Flagship drafting in progress…" : "Flagship draft pending")}
-                {rpStatus === "flagship_staged" && "Flagship staged — awaiting the writer's content confirmation"}
-                {rpStatus === "flagship_confirmed" && (fanoutRunning ? "Fan-out running — channel derivatives generating…" : "Flagship confirmed — fan-out unlocked")}
+                {rpStatus === "flagship_staged" && "Flagship staged — awaiting a Content Writer's confirmation"}
+                {rpStatus === "flagship_confirmed" && "Flagship confirmed — fan-out unlocked"}
                 {rpStatus === "derivatives_staged" && "Drafts staged for review"}
                 {(rpStatus === "escalated" || rpStatus === "failed") && "Escalated — gaps need a human"}
               </h2>
@@ -503,7 +658,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
               </BusyButton>
             </p>
           )}
-          {(drafting || fanoutRunning) && (
+          {drafting && (
             <p className="live-note">The agent is generating — this panel refreshes automatically.</p>
           )}
           {(() => {
@@ -576,10 +731,11 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
       </div>
       {inProduction && (
         <p className="box-standin-note">
-          "Mark content-confirmed" is the dev stand-in for Agent 4's review cycle — it
-          registers the REAL draft the Content Repurposing agent staged (with its claim
-          lineage); the synthetic placeholder is used only for reuse assets Agent 3
-          doesn't draft. In production this record comes from the Content Collaboration agent.
+          "Mark content-confirmed" is the REAL human gate carried by the live
+          Collaboration &amp; Iteration agent: it records your identity, sets aside any
+          open feedback explicitly, and its signal registers the actual staged draft
+          (with claim lineage) for packaging. Feedback, revision rounds and conflict
+          resolutions live on each draft card above.
         </p>
       )}
 
@@ -629,5 +785,97 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
         </div>
       )}
     </section>
+  );
+}
+
+/* ---------- Approvals: flagship content-confirm gate (Content Writer) ----------
+   Rendered in Approvals for a `flagship_confirm` task. Shows the live staged
+   flagship and routes the decision through the same store action the campaign page
+   uses, so there is exactly one confirm path. */
+
+export function LiveFlagshipConfirm({ task }: { task: Task }) {
+  const { state, actions, viewer } = useStore();
+  const campaign = state.campaigns.find((c) => c.id === task.campaignId);
+  const boxId = task.liveCaseId ?? campaign?.liveCampaignId;
+  const [rp, setRp] = useState<RepurposeDetail | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const reloadRp = useCallback(async () => {
+    if (!boxId) return;
+    try { setRp(await liveApi.boxDrafts(boxId)); setOffline(false); }
+    catch { setOffline(true); }
+  }, [boxId]);
+
+  useEffect(() => {
+    void reloadRp();
+    const timer = window.setInterval(() => void reloadRp(), 12000);
+    return () => window.clearInterval(timer);
+  }, [reloadRp]);
+
+  if (!campaign || !boxId) return <p className="live-empty">This flagship is not backed by a live campaign.</p>;
+  if (offline && !rp) return <OfflineNote />;
+  if (!rp) return <p className="live-empty">Loading the staged flagship…</p>;
+
+  const flagship = latestByAsset(rp.drafts).find((d) => d.kind === "flagship") ?? null;
+  const staged = rp.status === "flagship_staged";
+  const alreadyConfirmed = rp.status === "flagship_confirmed" || rp.status === "derivatives_staged";
+  const doc = flagship ? liveApi.boxDraftUrl(flagship.file_rel) : null;
+
+  async function confirm() {
+    if (busy) return;
+    setBusy(true);
+    try { await actions.confirmFlagshipContent(campaign!.id, task.id); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="gap-body">
+      {flagship ? (
+        <div className="brief-review-doc">
+          <p className="meta-label">Flagship draft v{flagship.version} · staged by the live Content Repurposing agent</p>
+          <h3 className="brief-review-title">{flagship.title}</h3>
+          <p>
+            {flagship.sections.length} section{flagship.sections.length === 1 ? "" : "s"} ·{" "}
+            {flagship.claim_markers.length} sourced claim marker{flagship.claim_markers.length === 1 ? "" : "s"} ·{" "}
+            self-check {flagship.self_check.passed ? `passed (attempt ${flagship.self_check.attempts})` : "failed"}
+          </p>
+          {doc && (
+            <a className="text-link" href={doc} target="_blank" rel="noreferrer">
+              <DownloadSimple size={13} /> Read the flagship draft (.docx) <ArrowSquareOut size={11} />
+            </a>
+          )}
+          {flagship.gap_notes.length > 0 && (
+            <ul className="box-gapnotes">
+              {flagship.gap_notes.map((g) => (<li key={g.gap_id}><strong>{g.section}:</strong> {g.needed}</li>))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <p className="live-note">The flagship is still drafting — this refreshes automatically. Confirm becomes available once it is staged.</p>
+      )}
+      <div className="agent-recommendation">
+        <Monogram size="sm">CR</Monogram>
+        <div>
+          <p className="meta-label">Why this is in front of you</p>
+          <p className="gate-why">
+            You are a Content Writer staffed on this campaign. The agent drafted the
+            flagship from sourced claims only — it can never confirm its own content.
+            Your confirmation is recorded on the bridge with your identity and role,
+            and unlocks the eight-channel derivative fan-out.
+          </p>
+        </div>
+      </div>
+      <div className="decision-footer">
+        <div><small>Recorded with identity, role and timestamp by the live agent.</small></div>
+        {alreadyConfirmed ? (
+          <Chip tone="green">Flagship already confirmed</Chip>
+        ) : (
+          <BusyButton busy={busy} busyLabel="Recording confirmation…" disabled={!staged || busy} onClick={() => void confirm()}>
+            <CheckCircle size={14} /> Confirm flagship content
+          </BusyButton>
+        )}
+      </div>
+    </div>
   );
 }
