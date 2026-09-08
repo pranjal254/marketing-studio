@@ -1,23 +1,33 @@
 import { useState } from "react";
-import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText } from "@phosphor-icons/react";
+import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText, Plus } from "@phosphor-icons/react";
 import { assigneeName, assigneeShort, campaignCost, effectiveWriters, openTasksFor, personById, useStore } from "../store";
+import { canAccess } from "../access";
 import { flagshipDoc, fullStamp, journeySteps, phaseLabels, stampTime, toneVars } from "../data";
 import { LiveBoxPackPanel, LiveProductionPanel } from "../boxPanels";
+import { LiveGatePanel } from "../gatePanel";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, Menu, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
 import { InlineDots } from "../loaders";
 
 export default function CampaignsScreen() {
-  const { state, now } = useStore();
+  const { state, now, viewer } = useStore();
   const { nav, go } = useNav();
   const selected = nav.campaignId ? state.campaigns.find((c) => c.id === nav.campaignId) : undefined;
   if (selected) return <CampaignDetail campaign={selected} />;
 
   const ordered = [...state.campaigns].sort((a, b) => (a.state === "approved_locked" ? 1 : 0) - (b.state === "approved_locked" ? 1 : 0) || b.step - a.step);
+  const canRequest = canAccess(viewer.role, "intake");
   return (
     <div className="screen-content campaigns-screen">
-      <section className="simple-page-header"><div><h1>Campaigns</h1><p>Every campaign in the workspace, color-coded, with its journey position, live cost and what the agents did last.</p></div></section>
+      <section className="simple-page-header">
+        <div><h1>Campaigns</h1><p>Every campaign in the workspace, color-coded, with its journey position, live cost and what the agents did last.</p></div>
+        {canRequest && (
+          <button className="primary-button" onClick={() => go("intake")}>
+            <Plus size={15} /> New campaign request
+          </button>
+        )}
+      </section>
       <section className="campaign-listing">
         {ordered.map((c) => {
           const cost = campaignCost(state, c.id);
@@ -221,6 +231,7 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
         <>
           <WriterStaffing campaign={campaign} />
           <LiveProductionPanel campaign={campaign} />
+          <LiveGatePanel campaign={campaign} />
         </>
       )}
 

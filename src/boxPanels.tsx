@@ -15,6 +15,7 @@ import {
 } from "./live";
 import { openTasksFor, useStore } from "./store";
 import { BusyButton, Chip, Monogram } from "./ui";
+import { DocPreviewModal, PreviewLink, type PreviewTarget } from "./DocPreview";
 import type { Campaign, Task } from "./types";
 
 function useBoxDetail(boxId: string | undefined) {
@@ -54,6 +55,23 @@ function decisionTone(decision: string): "green" | "blue" | "neutral" {
   if (decision === "adapt") return "blue";
   return "neutral";
 }
+
+/* One plain sentence per plan decision — the agent's full reasoning stays
+   available behind "Why", never as the card's face. */
+function decisionHeadline(item: { decision: string; reuse_ref: string | null; reuse_check_pending: boolean }): string {
+  const ref = item.reuse_ref ? item.reuse_ref.split(/[\\/]/).pop() : null;
+  if (item.decision === "reuse") return ref ? `Reusing ${ref} from your repository.` : "Reusing an existing repository asset as-is.";
+  if (item.decision === "adapt") return ref ? `Adapting ${ref} from your repository to this campaign.` : "Adapting an existing repository asset to this campaign.";
+  if (item.reuse_check_pending) return "Writing from scratch — the repository was unavailable at planning (reuse check pending).";
+  return "Writing from scratch — nothing suitable found in your repository.";
+}
+
+const CHECKLIST_STATUS_LABEL: Record<string, string> = {
+  planned: "planned",
+  in_production: "drafting & review",
+  content_confirmed: "confirmed",
+  packaged: "packaged",
+};
 
 function OfflineNote() {
   return (
@@ -216,6 +234,7 @@ export function LivePlanReview({ task }: { task: Task }) {
 
 export function LiveBoxPackPanel({ campaign }: { campaign: Campaign }) {
   const { detail, offline, gone } = useBoxDetail(campaign.liveCampaignId);
+  const [preview, setPreview] = useState<PreviewTarget | null>(null);
   if (gone) return <GoneNote />;
   if (offline) return <OfflineNote />;
   if (!detail?.pack) return null;
@@ -235,13 +254,13 @@ export function LiveBoxPackPanel({ campaign }: { campaign: Campaign }) {
         </p>
       )}
       {(packDoc || tracker) && (
-        <p className="live-note">
-          <DownloadSimple size={14} />{" "}
-          {packDoc && <a className="text-link" href={packDoc} target="_blank" rel="noreferrer">Audience & offer pack (.docx) <ArrowSquareOut size={12} /></a>}
-          {packDoc && tracker && " · "}
-          {tracker && <a className="text-link" href={tracker} target="_blank" rel="noreferrer">Status tracker (.csv) <ArrowSquareOut size={12} /></a>}
+        <p className="live-note doc-links">
+          {packDoc && <PreviewLink url={packDoc} title={`Audience & Offer Pack (v${pack.version})`} onOpen={setPreview} />}
+          {packDoc && <a className="text-link" href={packDoc} target="_blank" rel="noreferrer"><DownloadSimple size={13} /> Pack (.docx) <ArrowSquareOut size={12} /></a>}
+          {tracker && <a className="text-link" href={tracker} target="_blank" rel="noreferrer"><DownloadSimple size={13} /> Status tracker (.csv) <ArrowSquareOut size={12} /></a>}
         </p>
       )}
+      {preview && <DocPreviewModal target={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }
@@ -284,6 +303,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   const [commentText, setCommentText] = useState("");
   const [resolveFor, setResolveFor] = useState<string | null>(null);
   const [resolveText, setResolveText] = useState("");
+  const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const rpBusy = useRef(false);
 
   const reloadRp = useCallback(async (): Promise<RepurposeDetail | null> => {
@@ -348,6 +368,12 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   const confirmed = checklist.items.filter(
     (i) => i.status === "content_confirmed" || i.status === "packaged",
   ).length;
+  // Content production is the Content Writers' room: only they (and AiCoE Admin,
+  // who can act for any gate) confirm content, request rework, or run packaging.
+  // Everyone else sees the progress read-only, so the right user acts at the
+  // right time and nobody is handed a button that is not theirs.
+  const canProduce = viewer.role === "Content Writer" || viewer.role === "AiCoE Admin";
+  const allConfirmed = checklist.items.length > 0 && confirmed === checklist.items.length;
 
   const rpStatus = rp?.status ?? null;
   const rpDrafts = latestByAsset(rp?.drafts ?? []);
@@ -503,7 +529,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
             )}
           </div>
         ))}
-        {!confirmed && (
+        {!confirmed && canProduce && (
           <div className="box-asset-foot">
             {commentFor === assetId ? (
               <div className="box-rework">
@@ -538,6 +564,15 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
     const doc = liveApi.boxDraftUrl(draft.file_rel);
     const withheld = draft.status === "withheld";
     const rv = review?.assets.find((a) => a.state.asset_id === draft.asset_id);
+    const openComments = (rv?.feedback ?? []).filter((f) => f.status === "open");
+    // Pre-fill a rework instruction from the open review comments (the gate's
+    // findings land here as comments), so the writer can edit, add their own
+    // thoughts, and regenerate in one move.
+    function reworkFromFeedback() {
+      const seed = openComments.map((f) => `- ${f.text}`).join("\n");
+      setReworkText(seed ? `Apply these review points (edit or add your own):\n${seed}` : "");
+      setReworkFor(draft.asset_id);
+    }
     const classes = ["box-asset"];
     if (draft.kind === "flagship") classes.push("flagship");
     if (withheld) classes.push("withheld");
@@ -562,7 +597,9 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
               ? ` · lineage: ${draft.claim_lineage.join(", ")}`
               : ""}
           {" · self-check "}
-          {draft.self_check.passed ? `passed (attempt ${draft.self_check.attempts})` : "failed — not staged"}
+          {draft.self_check.passed
+            ? `passed (attempt ${draft.self_check.attempts})`
+            : withheld ? "no usable draft — request rework" : "staged with review flags"}
         </p>
         {draft.gap_notes.length > 0 && (
           <>
@@ -580,14 +617,22 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
         )}
         <div className="box-asset-foot">
           {doc && (
-            <a className="text-link" href={doc} target="_blank" rel="noreferrer">
-              <DownloadSimple size={13} /> Draft (.docx) <ArrowSquareOut size={11} />
-            </a>
+            <>
+              <PreviewLink url={doc} title={`${draft.title} (draft v${draft.version})`} onOpen={setPreview} />
+              <a className="text-link" href={doc} target="_blank" rel="noreferrer">
+                <DownloadSimple size={13} /> Draft (.docx) <ArrowSquareOut size={11} />
+              </a>
+            </>
           )}
-          {!withheld && (
+          {canProduce && openComments.length > 0 && (
+            <button className="secondary-button" disabled={busy} onClick={reworkFromFeedback}>
+              Rework using this feedback ({openComments.length})
+            </button>
+          )}
+          {canProduce && (
             <button className="secondary-button" disabled={busy}
               onClick={() => { setReworkFor(reworkFor === draft.asset_id ? null : draft.asset_id); setReworkText(""); }}>
-              Request rework
+              {withheld ? "Request rework" : "Rework with my instruction"}
             </button>
           )}
           {draft.kind === "flagship" && rpStatus === "flagship_staged" && !withheld && (
@@ -696,22 +741,46 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
         </div>
       )}
 
+      <p className="meta-label">
+        Asset plan — the agent's reuse/adapt/create decision and live status per checklist item
+      </p>
       <div className="box-assets">
         {checklist.items.map((item) => {
           const done = item.status === "content_confirmed" || item.status === "packaged";
+          const assetDrafts = (rp?.drafts ?? []).filter((d) => d.asset_id === item.asset_id);
+          const hasDraft = assetDrafts.length > 0;
+          const latestDraft = assetDrafts.reduce<RepurposeDraft | null>(
+            (best, d) => (best === null || d.version > best.version ? d : best), null,
+          );
+          const withheld = latestDraft?.status === "withheld";
           return (
             <article className="box-asset" key={item.asset_id}>
               <div className="box-asset-head">
                 <Chip tone={decisionTone(item.decision)}>{item.decision}</Chip>
                 <strong>{item.label}</strong>
-                <Chip tone={done ? "green" : "neutral"}>{item.status.replace(/_/g, " ")}</Chip>
+                <Chip tone={done ? "green" : item.status === "in_production" ? "blue" : "neutral"}>
+                  {CHECKLIST_STATUS_LABEL[item.status] ?? item.status.replace(/_/g, " ")}
+                </Chip>
               </div>
-              <p>{item.decision_rationale}</p>
-              {(inProduction && item.status === "in_production") || summary.status === "packaged_pending_compliance" ? (
+              <p className="box-asset-headline">{decisionHeadline(item)}</p>
+              {item.status === "in_production" && (
+                <p className="box-asset-hint">
+                  {withheld
+                    ? `The latest draft (v${latestDraft?.version}) was WITHHELD by the agent's self-check — leave feedback on its card above and run a revision round; confirmation stays blocked until a version passes.`
+                    : hasDraft
+                      ? "Read the draft and reviewer feedback on its card above; confirming records the human gate with your identity."
+                      : "No draft is staged for this asset (reuse path) — confirming registers the repository version for packaging."}
+                </p>
+              )}
+              <details className="box-asset-why">
+                <summary>Why the agent decided this</summary>
+                <p>{item.decision_rationale}</p>
+              </details>
+              {canProduce && ((inProduction && item.status === "in_production") || summary.status === "packaged_pending_compliance") ? (
                 <div className="box-asset-foot">
                   {inProduction && item.status === "in_production" && (
                     <BusyButton kind="secondary" busy={busyAction === `confirm:${item.asset_id}`}
-                      busyLabel="Registering…" disabled={busy}
+                      busyLabel="Registering…" disabled={busy || withheld}
                       onClick={() => void run(`confirm:${item.asset_id}`, () => liveApi.boxConfirmAsset(boxId, item.asset_id, viewer.email), `${item.label} marked content-confirmed`)}>
                       <CheckCircle size={14} /> Mark content-confirmed
                     </BusyButton>
@@ -729,7 +798,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
           );
         })}
       </div>
-      {inProduction && (
+      {inProduction && canProduce && (
         <p className="box-standin-note">
           "Mark content-confirmed" is the REAL human gate carried by the live
           Collaboration &amp; Iteration agent: it records your identity, sets aside any
@@ -738,15 +807,25 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
           resolutions live on each draft card above.
         </p>
       )}
+      {inProduction && !canProduce && (
+        <p className="box-standin-note">
+          <WarningCircle size={13} /> Content production is with the Content Writers.
+          You can follow progress here; the drafts move to your gate once every asset
+          is content-confirmed and the package is assembled.
+        </p>
+      )}
 
-      {inProduction && (
+      {inProduction && canProduce && (
         <div className="box-packaging">
           <div>
             <strong>Deterministic packaging module</strong>
-            <small>No LLM — completeness diff, naming checks, sha256 snapshots. Blocks on any gap.</small>
+            <small>
+              No LLM — completeness diff, naming checks, sha256 snapshots. Blocks on any gap.
+              {!allConfirmed && ` Confirm every asset first (${confirmed}/${checklist.items.length} done).`}
+            </small>
           </div>
           <BusyButton busy={busyAction === "package"} busyLabel="Packaging — hashing snapshots…"
-            disabled={busy}
+            disabled={busy || !allConfirmed}
             onClick={() => void run("package", () => liveApi.boxPackage(boxId), "Packaging run finished")}>
             <Cube size={15} /> Run packaging
           </BusyButton>
@@ -772,18 +851,22 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
               <article className="box-asset slim" key={a.asset_id}>
                 <div className="box-asset-head">
                   <Chip tone="green">v{a.version}</Chip>
-                  <strong>
-                    <a className="text-link" href={liveApi.boxSnapshotUrl(summary.folder, a.canonical_name) ?? "#"} target="_blank" rel="noreferrer">
-                      {a.canonical_name}
-                    </a>
-                  </strong>
+                  <strong>{a.canonical_name}</strong>
                 </div>
                 <p>sha256 {a.sha256.slice(0, 16)}… · post-packaging edits are detectable</p>
+                <div className="box-asset-foot">
+                  <PreviewLink url={liveApi.boxSnapshotUrl(summary.folder, a.canonical_name)}
+                    title={a.canonical_name} onOpen={setPreview} />
+                  <a className="text-link" href={liveApi.boxSnapshotUrl(summary.folder, a.canonical_name) ?? "#"} target="_blank" rel="noreferrer">
+                    <DownloadSimple size={13} /> .docx <ArrowSquareOut size={11} />
+                  </a>
+                </div>
               </article>
             ))}
           </div>
         </div>
       )}
+      {preview && <DocPreviewModal target={preview} onClose={() => setPreview(null)} />}
     </section>
   );
 }
@@ -813,6 +896,15 @@ export function LiveFlagshipConfirm({ task }: { task: Task }) {
     return () => window.clearInterval(timer);
   }, [reloadRp]);
 
+  // Confirmed on the bridge via the campaign panel → this mirror task has
+  // nothing left to do; close it so the writer's queue moves on.
+  const confirmedOnBridge =
+    rp?.status === "flagship_confirmed" || rp?.status === "derivatives_staged";
+  useEffect(() => {
+    if (confirmedOnBridge && task.status === "open") actions.clearFlagshipTask(task.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- actions is unstable; keyed on status
+  }, [confirmedOnBridge, task.id, task.status]);
+
   if (!campaign || !boxId) return <p className="live-empty">This flagship is not backed by a live campaign.</p>;
   if (offline && !rp) return <OfflineNote />;
   if (!rp) return <p className="live-empty">Loading the staged flagship…</p>;
@@ -840,15 +932,31 @@ export function LiveFlagshipConfirm({ task }: { task: Task }) {
             {flagship.claim_markers.length} sourced claim marker{flagship.claim_markers.length === 1 ? "" : "s"} ·{" "}
             self-check {flagship.self_check.passed ? `passed (attempt ${flagship.self_check.attempts})` : "failed"}
           </p>
+          {flagship.sections.length === 0 && (
+            <p className="live-note">
+              <WarningCircle size={13} /> The agent staged NO grounded body sections — it
+              never invents facts it cannot source. The items below are gap notes: the
+              evidence marketing must provide. Add sources to
+              references/proof-points, then use &quot;Request rework&quot; on the campaign&apos;s
+              Content production tab instead of confirming this draft.
+            </p>
+          )}
           {doc && (
             <a className="text-link" href={doc} target="_blank" rel="noreferrer">
               <DownloadSimple size={13} /> Read the flagship draft (.docx) <ArrowSquareOut size={11} />
             </a>
           )}
           {flagship.gap_notes.length > 0 && (
-            <ul className="box-gapnotes">
-              {flagship.gap_notes.map((g) => (<li key={g.gap_id}><strong>{g.section}:</strong> {g.needed}</li>))}
-            </ul>
+            <>
+              <p className="live-note">
+                <WarningCircle size={13} /> {flagship.gap_notes.length} gap note
+                {flagship.gap_notes.length === 1 ? "" : "s"} — evidence the agent needed but
+                refused to invent:
+              </p>
+              <ul className="box-gapnotes">
+                {flagship.gap_notes.map((g) => (<li key={g.gap_id}><strong>{g.section}:</strong> {g.needed}</li>))}
+              </ul>
+            </>
           )}
         </div>
       ) : (

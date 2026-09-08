@@ -32,6 +32,7 @@ type Action =
   | { type: "PERSON_ADD"; person: Person }
   | { type: "PERSON_PATCH"; id: string; patch: Partial<Person> }
   | { type: "PERSON_REMOVE"; id: string }
+  | { type: "PEOPLE_SET"; people: Person[] }
   | { type: "VIEWAS"; id: string };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -59,6 +60,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "PERSON_ADD": return { ...state, people: [...state.people, action.person] };
     case "PERSON_PATCH": return { ...state, people: state.people.map((p) => p.id === action.id ? { ...p, ...action.patch } : p) };
     case "PERSON_REMOVE": return { ...state, people: state.people.filter((p) => p.id !== action.id) };
+    case "PEOPLE_SET": return { ...state, people: action.people };
     case "VIEWAS": return { ...state, viewAsId: action.id };
     default: return state;
   }
@@ -97,6 +99,18 @@ export type MirrorLiveBrief = {
    Shape built by live.buildBoxSync. */
 export type SyncLiveBoxInput = BoxSyncInput;
 
+/* A live Quality-Gate review task, mirrored into the studio queue so approvers
+   find gate work exactly where every other approval lives. */
+export type LiveGateTaskInput = {
+  task_id: string;
+  scope: "asset" | "package";
+  asset_id: string;
+  step: string;
+  status: "open" | "approved" | "returned" | "cancelled";
+  due: string;
+  decided_by: string | null;
+};
+
 const BOX_ASSET_STATE: Record<string, Asset["state"]> = {
   planned: "planned", in_production: "drafting", reopened: "drafting",
   content_confirmed: "content_confirmed", packaged: "approved",
@@ -124,6 +138,7 @@ function boxEventSummary(r: Record<string, unknown>): string {
       if (what.startsWith("derivative:")) return `Channel derivative drafted: ${what.slice(11).replace(/_/g, " ")}`;
       if (what === "consolidate_feedback") return "Reviewer feedback consolidated — de-duplicated, classified, conflicts held";
       if (what === "apply_textual_edits") return "Agreed textual edits applied as a new tracked version";
+      if (what === "contextual_compliance_check") return "Contextual compliance pass run (meaning-level rules, fail-closed)";
       return `Decision: ${what || "abstained"}`;
     }
     case "case_escalated": return `Escalated to ${r["shiftai.escalation.routed_to"]}: ${r["shiftai.learn.reason_code"]}`;
@@ -135,6 +150,8 @@ function boxEventSummary(r: Record<string, unknown>): string {
       if (cls === "assign_reviewers") return `Reviewers assigned from the workflow plan (due ${r["shiftai.review.due"] ?? "—"})`;
       if (cls === "stage_revision") return `Revised version staged for re-review (v${r["shiftai.draft.version"] ?? ""})`;
       if (cls === "send_review_reminder") return "Review reminder sent (stale-asset sweep)";
+      if (cls === "gate_package") return "Quality gate run on the package manifest (per-asset verdicts recorded)";
+      if (cls === "lock_and_release_package") return "Package approved — versions locked read-only, reference released";
       return cls;
     }
     case "human_gate": return `Human gate: ${r["shiftai.hitl.decision"]} by ${r["shiftai.hitl.actor.role"]}`;
@@ -158,7 +175,8 @@ function boxEventFromSts(
     ? (r["shiftai.cost.amount"] as number) : 0;
   const liveAgent = String(r["shiftai.agent.id"] ?? "");
   const agentKey = liveAgent === "content_repurposing" ? "CR"
-    : liveAgent === "collaboration_iteration" ? "CO" : "CB";
+    : liveAgent === "collaboration_iteration" ? "CO"
+    : liveAgent === "quality_gate_approval" ? "QG" : "CB";
   return {
     id: `evb_${seq}`,
     ts: Date.parse(String(r["shiftai.timestamp"])) || Date.now(),
@@ -220,6 +238,8 @@ type Store = {
     staffWriters: (campaignId: string, writerIds: string[]) => void;
     ensureFlagshipTask: (campaignId: string) => void;
     confirmFlagshipContent: (campaignId: string, taskId?: string) => Promise<void>;
+    clearFlagshipTask: (taskId: string) => void;
+    syncGateTasks: (campaignId: string, gateTasks: LiveGateTaskInput[]) => void;
     decideConflict: (taskId: string, decision: "recommended" | "operational" | "returned", note?: string) => void;
     completeReview: (taskId: string) => void;
     requestChanges: (taskId: string, aspects: string[], note: string) => void;
@@ -247,6 +267,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<string | null>(null);
   const [traceId, setTraceId] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
+  // Campaigns whose Agent-2 planning pass is running right now (approveBrief has
+  // an in-flight boxPlan). The reconciliation loop skips these: a 404 during
+  // planning means "case not created yet", never "bridge restarted".
+  const planningInFlight = useRef<Set<string>>(new Set());
+  // Consecutive 404s per campaign in the reconciliation loop. A transient 404
+  // (planning still producing the case) must not be mistaken for a lost link;
+  // only a 404 that persists past the planning window is a genuine restart.
+  const notFound = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const tick = window.setInterval(() => setNow(Date.now()), 30000);
@@ -484,6 +512,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const owner = campaign?.ownerId ?? "rishi";
         emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "planning_started", summary: "Approved brief handed to the REAL Campaign-in-a-Box agent — planning pass running (1–3 min)", cost: 0, sources: ["Live agent bridge"] });
         if (liveCampaignId) {
+          planningInFlight.current.add(task.campaignId);
           void (async () => {
             try {
               await liveApi.boxPlan(liveCampaignId, viewer.email);
@@ -491,19 +520,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const records = await liveApi.boxTelemetry();
               actions.syncLiveBox(buildBoxSync(detail, records));
               if (detail.summary.status === "awaiting_confirmation") {
+                // Pack + plan confirmation is the BU Campaign Lead's gate: they
+                // approved the brief and own the campaign's business direction.
                 addTask({
                   kind: "plan_confirm", campaignId: task.campaignId,
                   title: "Confirm audience & offer pack + plan",
                   detail: `${campaign?.name ?? "Campaign"} · proposed by the LIVE Campaign-in-a-Box agent`,
-                  assigneeId: owner, slaHours: 48, liveCaseId: liveCampaignId,
+                  assigneeId: "", eligibleRole: "BU Campaign Lead",
+                  slaHours: 48, liveCaseId: liveCampaignId,
                 });
-                notify(owner, `${campaign?.name ?? "Campaign"}: the real audience & offer pack and plan are ready for your confirmation`, task.campaignId);
+                state.people
+                  .filter((p) => p.role === "BU Campaign Lead" && p.status === "Active")
+                  .forEach((p) => notify(p.id, `${campaign?.name ?? "Campaign"}: the real audience & offer pack and plan are ready for your confirmation`, task.campaignId));
               } else {
                 notify(owner, `${campaign?.name ?? "Campaign"}: planning finished with status ${detail.summary.status.replace(/_/g, " ")} — see Live agents`, task.campaignId);
               }
             } catch (e) {
               emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "planning_failed", summary: `Planning pass failed: ${e instanceof Error ? e.message : e}`, cost: 0, outcome: "blocked", sources: ["Live agent bridge"] });
               notify(owner, `${campaign?.name ?? "Campaign"}: the planning pass failed — check the bridge (Live agents)`, task.campaignId);
+            } finally {
+              planningInFlight.current.delete(task.campaignId);
             }
           })();
         }
@@ -512,8 +548,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         later(1900, () => {
           emit({ ts: Date.now(), trace, agent: "CB", campaignId: task.campaignId, activity: "plan_campaign", summary: "Audience & offer pack, 9-asset checklist and workspace created", tokens: { input: 19600, output: 5300 }, cost: 0.55, llm: 37000, sources: ["Brief v1.0", "Workspace template v2.0"] });
           dispatch({ type: "CAMPAIGN_PATCH", id: task.campaignId, patch: { step: 3 } });
-          addTask({ kind: "plan_confirm", campaignId: task.campaignId, title: "Confirm audience & offer", detail: `${campaign?.name ?? "Campaign"} · pack and plan proposed by Campaign-in-a-Box`, assigneeId: campaign?.ownerId ?? "rishi", slaHours: 48 });
-          notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: audience & offer pack is ready for your confirmation`, task.campaignId);
+          addTask({ kind: "plan_confirm", campaignId: task.campaignId, title: "Confirm audience & offer", detail: `${campaign?.name ?? "Campaign"} · pack and plan proposed by Campaign-in-a-Box`, assigneeId: "", eligibleRole: "BU Campaign Lead", slaHours: 48 });
+          state.people.filter((p) => p.role === "BU Campaign Lead" && p.status === "Active").forEach((p) => notify(p.id, `${campaign?.name ?? "Campaign"}: audience & offer pack is ready for your confirmation`, task.campaignId));
         });
       }
       showToast("Brief approved and recorded");
@@ -588,7 +624,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const campaign = state.campaigns.find((c) => c.id === task.campaignId);
       dispatch({ type: "TASK_PATCH", id: taskId, patch: { status: "done", resolution: { decision: "Pack & plan confirmed", byId: state.viewAsId, at: Date.now() } } });
       record(task.campaignId, "Pack & plan confirmed (live agent)", state.viewAsId);
-      emit({ ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: task.campaignId, activity: "plan_confirmed", summary: `Pack and plan confirmed by ${viewer.name} — recorded by the live agent with identity`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "planning", current: "in_production", reason: "Marketing Lead confirmation recorded by the Campaign-in-a-Box agent" } });
+      emit({ ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: task.campaignId, activity: "plan_confirmed", summary: `Pack and plan confirmed by ${viewer.name} — recorded by the live agent with identity`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "planning", current: "in_production", reason: "BU Campaign Lead confirmation recorded by the Campaign-in-a-Box agent" } });
       notify(campaign?.ownerId ?? "rishi", `${campaign?.name ?? "Campaign"}: assets are in production — the flagship goes to a Content Writer for content confirmation`, task.campaignId);
       // The flagship content-confirm gate belongs to the Content Writers — raise the
       // shared task now so it sits in their queue while the agent drafts.
@@ -703,6 +739,73 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const d = await liveApi.boxDetail(boxId);
         actions.syncLiveBox(buildBoxSync(d, await liveApi.boxTelemetry()));
       } catch { /* mirror only */ }
+    },
+
+    /* The flagship was confirmed on the bridge OUTSIDE this task (campaign
+       panel path) — the studio task is a mirror, so it closes itself instead of
+       lingering in a writer's queue with nothing left to do. */
+    clearFlagshipTask: (taskId) => {
+      const task = state.tasks.find((t) => t.id === taskId);
+      if (!task || task.status !== "open") return;
+      dispatch({
+        type: "TASK_PATCH", id: taskId,
+        patch: {
+          status: "done",
+          resolution: {
+            decision: "Flagship confirmed on the live bridge (recorded there with identity)",
+            byId: state.viewAsId, at: Date.now(),
+          },
+        },
+      });
+    },
+
+    /* Mirror the live Quality Gate's review tasks into the studio queue: open
+       gate tasks become shared, role-gated queue items (Grammar / Quality
+       Reviewer for asset reviews, BU Campaign Lead for the package sign-off);
+       decided/cancelled gate tasks close their mirrors. Idempotent — mirror ids
+       are derived from the gate task id. */
+    syncGateTasks: (campaignId, gateTasks) => {
+      const campaign = state.campaigns.find((c) => c.id === campaignId);
+      if (!campaign?.liveCampaignId) return;
+      for (const gt of gateTasks) {
+        const mirrorId = `gt_${gt.task_id}`;
+        const mirror = state.tasks.find((t) => t.id === mirrorId);
+        if (gt.status === "open" && !mirror) {
+          const isPackage = gt.scope === "package";
+          dispatch({
+            type: "TASK_ADD",
+            task: {
+              id: mirrorId,
+              kind: isPackage ? "package_signoff" : "grammar_qa",
+              campaignId,
+              title: isPackage
+                ? "Sign off & lock campaign package"
+                : `Language QA: ${gt.asset_id.replace(/_/g, " ")}`,
+              detail: `${campaign.name} · live quality gate · due ${gt.due}`,
+              assigneeId: "",
+              eligibleRole: isPackage ? "BU Campaign Lead" : "Grammar / Quality Reviewer",
+              createdAt: Date.now(),
+              slaHours: isPackage ? 48 : 24,
+              remindersSent: 0,
+              escalated: false,
+              status: "open",
+              liveCaseId: campaign.liveCampaignId,
+            },
+          });
+        } else if (gt.status !== "open" && mirror && mirror.status === "open") {
+          dispatch({
+            type: "TASK_PATCH", id: mirrorId,
+            patch: {
+              status: "done",
+              resolution: {
+                decision: `${gt.status} on the live bridge`
+                  + (gt.decided_by ? ` by ${gt.decided_by}` : ""),
+                byId: state.viewAsId, at: Date.now(),
+              },
+            },
+          });
+        }
+      }
     },
 
     decideConflict: (taskId, decision, note) => {
@@ -841,8 +944,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
 
     addUser: (name, email, role) => {
-      dispatch({ type: "PERSON_ADD", person: { id: uid("p"), name, initials: initialsOf(name), role, email, status: "Invited", lastActive: "Invite sent" } });
-      showToast(`Invite sent to ${name}`);
+      // Admin-side provisioning (no self-serve invite flow): the user is Active
+      // immediately, and persists in the workspace DB via the bridge. The local
+      // add is optimistic; the DB id replaces the temp id when the call returns.
+      const tempId = uid("p");
+      dispatch({ type: "PERSON_ADD", person: { id: tempId, name, initials: initialsOf(name), role, email, status: "Active", lastActive: "Just added" } });
+      showToast(`${name} added as ${role}`);
+      void liveApi.createUser(name, email, role)
+        .then((u) => dispatch({ type: "PERSON_PATCH", id: tempId, patch: { id: u.id } }))
+        .catch(() => { /* offline: local-only for this session */ });
     },
 
     updateUser: (id, patch) => {
@@ -852,14 +962,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (patch.name) next.initials = initialsOf(patch.name);
       dispatch({ type: "PERSON_PATCH", id, patch: next });
       showToast(`${patch.name ?? person.name}'s details updated`);
+      void liveApi.updateUser(id, patch).catch(() => { /* offline: local-only */ });
     },
 
     removeUser: (id) => {
       const person = state.people.find((p) => p.id === id);
       dispatch({ type: "PERSON_REMOVE", id });
       showToast(`${person?.name ?? "User"} removed from the workspace`);
+      void liveApi.deleteUser(id).catch(() => { /* offline: local-only */ });
     },
   };
+
+  /* Load the persisted user directory from the bridge once, and use it as the
+     source of truth for people. Falls back to the local seed when the bridge is
+     offline, so the studio always has a usable workspace. */
+  const usersLoaded = useRef(false);
+  useEffect(() => {
+    if (usersLoaded.current) return;
+    usersLoaded.current = true;
+    void liveApi.listUsers()
+      .then((users) => {
+        if (users.length === 0) return;
+        dispatch({
+          type: "PEOPLE_SET",
+          people: users.map((u) => ({
+            id: u.id, name: u.name, initials: initialsOf(u.name),
+            role: u.role as Person["role"], email: u.email,
+            status: u.status as Person["status"], lastActive: "Now",
+          })),
+        });
+      })
+      .catch(() => { /* offline: keep the local seed */ });
+  }, []);
 
   /* Reconciliation: a live campaign left in "planning" with no open plan_confirm
      task means the studio lost the in-flight continuation (page reload during the
@@ -870,6 +1004,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const pending = state.campaigns.filter(
       (c) => c.liveCampaignId && c.state === "planning"
         && !reconciled.current.has(c.id)
+        && !planningInFlight.current.has(c.id)  // active boxPlan owns this campaign
         && !state.tasks.some((t) => t.campaignId === c.id && t.kind === "plan_confirm" && t.status === "open"),
     );
     if (pending.length === 0) return;
@@ -887,30 +1022,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const records = await liveApi.boxTelemetry();
             if (cancelled) return;
             actions.syncLiveBox(buildBoxSync(detail, records));
+            notFound.current.delete(c.id); // the case exists — clear any 404 streak
             if (detail.summary.status === "awaiting_confirmation") {
               reconciled.current.add(c.id);
               addTask({
                 kind: "plan_confirm", campaignId: c.id,
                 title: "Confirm audience & offer pack + plan",
                 detail: `${c.name} · proposed by the LIVE Campaign-in-a-Box agent`,
-                assigneeId: c.ownerId, slaHours: 48, liveCaseId: c.liveCampaignId,
+                assigneeId: "", eligibleRole: "BU Campaign Lead",
+                slaHours: 48, liveCaseId: c.liveCampaignId,
               });
-              notify(c.ownerId, `${c.name}: the real audience & offer pack and plan are ready for your confirmation`, c.id);
+              state.people
+                .filter((p) => p.role === "BU Campaign Lead" && p.status === "Active")
+                .forEach((p) => notify(p.id, `${c.name}: the real audience & offer pack and plan are ready for your confirmation`, c.id));
             } else if (detail.summary.status !== "planning") {
               reconciled.current.add(c.id); // already past the gate — mirror synced
             }
           } catch (e) {
             if (e instanceof LiveApiError && e.status === 404) {
-              // The bridge no longer knows this campaign — its state was reset
-              // (restart / new session / free-tier redeploy). Stop polling for
-              // good and tell the owner once; the local journey stays intact.
-              reconciled.current.add(c.id);
-              emit({
-                ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: c.id,
-                activity: "live_link_lost", outcome: "blocked", system: true,
-                summary: "Live campaign state no longer exists on the agent bridge (it restarted). Create a new campaign to run the live flow again.",
-              });
-              notify(c.ownerId, `${c.name}: the agent bridge restarted and this campaign's live state is gone — create a new campaign to re-run the flow`, c.id);
+              // A 404 here is AMBIGUOUS: either planning is still producing the
+              // case (transient, common right after approval) or the bridge was
+              // reset. Only conclude "lost" after the 404 persists well past the
+              // planning window (~3 min at a 12s cadence), so a healthy in-flight
+              // plan is never mislabeled Blocked.
+              const streak = (notFound.current.get(c.id) ?? 0) + 1;
+              notFound.current.set(c.id, streak);
+              if (streak >= 15) {
+                reconciled.current.add(c.id);
+                notFound.current.delete(c.id);
+                emit({
+                  ts: Date.now(), trace: uid("tr"), agent: "studio", campaignId: c.id,
+                  activity: "live_link_lost", outcome: "blocked", system: true,
+                  summary: "Live campaign state no longer exists on the agent bridge (it restarted). Create a new campaign to run the live flow again.",
+                });
+                notify(c.ownerId, `${c.name}: the agent bridge restarted and this campaign's live state is gone — create a new campaign to re-run the flow`, c.id);
+              }
             }
             /* otherwise: plan still running or bridge down — try again next tick */
           }

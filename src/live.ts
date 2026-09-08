@@ -204,6 +204,68 @@ export type ReviewAsset = {
 
 export type ReviewDetail = { assets: ReviewAsset[] };
 
+/* ---------- Agent 5 (Quality Gate & Approval) payload types ---------- */
+
+export type GateFinding = {
+  rule_id: string; severity: "blocking" | "advisory";
+  source: "deterministic" | "contextual";
+  location: string; quote: string; quote_verified: boolean;
+  reasoning: string; remediation: string;
+};
+
+export type GateReport = {
+  asset_id: string; asset_type: string; version: number; sha256: string;
+  findings: GateFinding[]; verdict: "pass" | "fail";
+  checks_complete: boolean; incomplete_reason: string;
+  deterministic_ms: number; contextual_ms: number;
+  rules_pack_id: string; rules_pack_version: string; checked_at: string;
+};
+
+export type GateTask = {
+  task_id: string; scope: "asset" | "package"; asset_id: string;
+  step: string; role: string; sequence_index: number;
+  sla_business_days: number; due: string;
+  status: "open" | "approved" | "returned" | "cancelled";
+  reminders_sent: number; escalated: boolean; created_at: string;
+  decided_by: string | null; decided_role: string | null; decided_at: string | null;
+  notes: string;
+};
+
+export type GateApproval = {
+  approval_id: string; scope: "asset" | "package"; asset_id: string; step: string;
+  decision: "approved" | "returned"; actor_id: string; actor_role: string;
+  asset_version: number; sha256: string; notes: string; at: string;
+};
+
+export type GateLock = { asset_id: string; final_ref: string; sha256: string };
+
+export type GateState = {
+  campaign_id: string; manifest_id: string; manifest_version: number;
+  status: "gate_failed" | "in_review" | "returned" | "approved_locked" | "invalidated";
+  asset_verdicts: Record<string, "pass" | "fail">;
+  failed_asset_ids: string[]; locks: GateLock[];
+  approved_at: string | null; gate_started_at: string; updated_at: string;
+};
+
+export type GateCalibration = {
+  event_id: string; asset_id: string; rule_id: string;
+  kind: "false_positive" | "false_negative" | "dispute";
+  reviewer_id: string; reviewer_role: string; notes: string; at: string;
+};
+
+export type GateDetail = {
+  state: GateState | null;
+  reports: GateReport[];
+  tasks: GateTask[];
+  approvals: GateApproval[];
+  calibration: GateCalibration[];
+};
+
+export type GateOutcome = {
+  campaign_id: string; manifest_version: number; status: GateState["status"];
+  failed_asset_ids: string[]; tasks_created: number; reused_reports: number;
+};
+
 /* The REAL Campaign-in-a-Box run, shaped for the studio store's mirror. */
 export type BoxSyncInput = {
   liveCampaignId: string;
@@ -230,7 +292,8 @@ export function buildBoxSync(detail: BoxDetail, records: StsRecord[]): BoxSyncIn
       (r) => r["shiftai.case.id"] === detail.summary.campaign_id
         && (r["shiftai.agent.id"] === "campaign_in_a_box"
           || r["shiftai.agent.id"] === "content_repurposing"
-          || r["shiftai.agent.id"] === "collaboration_iteration"),
+          || r["shiftai.agent.id"] === "collaboration_iteration"
+          || r["shiftai.agent.id"] === "quality_gate_approval"),
     ),
   };
 }
@@ -420,14 +483,84 @@ export const liveApi = {
     folder
       ? tokenized(`${LIVE_API}/api/box/documents?path=${encodeURIComponent(`${folder}/final/${canonicalName}`)}`)
       : null,
+
+  /* ---------- Agent 5: Quality Gate & Approval ---------- */
+
+  boxGate: (campaignId: string) =>
+    call<GateDetail>(`/api/box/campaigns/${campaignId}/gate`),
+
+  boxGateRun: (campaignId: string) =>
+    call<GateOutcome>(`/api/box/campaigns/${campaignId}/gate/run`, {
+      method: "POST", body: "{}",
+    }),
+
+  boxGateDecision: (
+    campaignId: string, taskId: string,
+    decision: "approved" | "returned", actorId: string, actorRole: string,
+    notes: string, disputedRuleIds: string[], returnAssetIds: string[],
+  ) =>
+    call<GateTask>(`/api/box/campaigns/${campaignId}/gate/tasks/${taskId}/decision`, {
+      method: "POST",
+      body: JSON.stringify({
+        decision, actor_id: actorId, actor_role: actorRole, notes,
+        disputed_rule_ids: disputedRuleIds, return_asset_ids: returnAssetIds,
+      }),
+    }),
+
+  boxGateFalseNegative: (
+    campaignId: string, assetId: string, ruleId: string,
+    reviewerId: string, reviewerRole: string, notes: string,
+  ) =>
+    call<GateCalibration>(`/api/box/campaigns/${campaignId}/gate/false-negative`, {
+      method: "POST",
+      body: JSON.stringify({
+        asset_id: assetId, rule_id: ruleId,
+        reviewer_id: reviewerId, reviewer_role: reviewerRole, notes,
+      }),
+    }),
+
+  boxGateSweep: (campaignId: string) =>
+    call<{ reminders_sent: number; reviews_escalated: number; package_slips_escalated: number }>(
+      `/api/box/campaigns/${campaignId}/gate/sweep`,
+      { method: "POST", body: "{}" },
+    ),
+
+  boxGateVerifyLocks: (campaignId: string) =>
+    call<{ violated: string[] }>(`/api/box/campaigns/${campaignId}/gate/verify-locks`, {
+      method: "POST", body: "{}",
+    }),
+
+  /* ---------- Workspace user directory (persisted in the DB) ---------- */
+
+  listUsers: () => call<LiveUser[]>("/api/users"),
+
+  createUser: (name: string, email: string, role: string) =>
+    call<LiveUser>("/api/users", {
+      method: "POST", body: JSON.stringify({ name, email, role }),
+    }),
+
+  updateUser: (id: string, patch: Partial<Pick<LiveUser, "name" | "email" | "role" | "status">>) =>
+    call<LiveUser>(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  deleteUser: (id: string) =>
+    call<{ status: string; id: string }>(`/api/users/${id}`, { method: "DELETE" }),
 };
+
+export type LiveUser = { id: string; name: string; email: string; role: string; status: string };
 
 /* ---------- value mapping: agent slugs <-> studio labels ---------- */
 
+/* The nine industries LevelShift serves (Brand Playbook). */
 export const VERTICAL_LABEL: Record<string, string> = {
-  financial_services: "Financial Services",
   manufacturing: "Manufacturing",
-  technology: "Technology",
+  financial_services: "Financial Services",
+  technology: "High Tech / Technology",
+  healthcare: "Healthcare",
+  real_estate: "Real Estate",
+  hospitality_travel: "Hospitality & Travel",
+  nonprofit_education: "Nonprofit & Education",
+  professional_services: "Professional Services",
+  retail: "Retail",
 };
 export const VERTICAL_SLUG: Record<string, string> = Object.fromEntries(
   Object.entries(VERTICAL_LABEL).map(([slug, label]) => [label, slug]),

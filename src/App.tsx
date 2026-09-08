@@ -12,6 +12,7 @@ import { NavTransitionContext, useNav, type NavTarget } from "./nav";
 import { Avatar, MicButton, Modal, Toast, TraceDrawer, agentName, useAutoCloseDetails } from "./ui";
 import { AppSplash, PageLoader } from "./loaders";
 import { ContextPanel } from "./panel";
+import { LiveTaskSync } from "./gatePanel";
 import { canAccess, isAdmin } from "./access";
 import LoginScreen from "./Login";
 
@@ -334,6 +335,7 @@ function Shell() {
   return (
     <main className={`app-shell${collapsed ? " is-collapsed" : ""}${ctxOpen ? " panel-open" : ""}`}>
       {routePending && <span className="route-progress" aria-hidden="true" />}
+      <LiveTaskSync />{/* headless: mirrors live gate tasks into the queue on every page */}
       <aside className="sidebar">
         <div className="sidebar-head">
           <button className="brand" onClick={() => go("home")}><span className="brand-mark"><img src="/logo-icon.svg" alt="ShiftAI" /></span><span className="brand-text"><strong>ShiftAI</strong><small>Marketing Studio</small></span></button>

@@ -12,12 +12,13 @@ export const SCHEMA_VERSION = 7;
    ids (rishi/marcus/jen/tom) are kept stable across identity changes because the
    demo wiring references them directly, so only name/email/role/status are edited. */
 export const seedPeople: Person[] = [
+  // The 5 default users (also the production default set; more are added from
+  // the admin Users page). IDs are stable — task routing references them.
   { id: "aicoe", name: "AiCoE Admin", initials: "AI", role: "AiCoE Admin", email: "aicoe@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "marcus", name: "Ramya Srinivasan", initials: "RS", role: "BU Campaign Lead", email: "ramya_s4@levelshift.com", status: "Active", lastActive: "Now" },
+  { id: "rishi", name: "Neeraj Vasant Sangani", initials: "NV", role: "Marketing Lead", email: "neeraj_v@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "jen", name: "Jen Cook", initials: "JC", role: "Content Writer", email: "jen.cook@levelshift.com", status: "Active", lastActive: "12 minutes ago" },
-  { id: "tom", name: "Tom Aldridge", initials: "TA", role: "Grammar / Quality Reviewer", email: "tom.aldridge@levelshift.com", status: "Active", lastActive: "2 days ago" },
-  { id: "leah", name: "Leah Novak", initials: "LN", role: "Viewer", email: "leah.novak@levelshift.com", status: "Active", lastActive: "Now" },
-  { id: "rishi", name: "Marketing Admin", initials: "MA", role: "Marketing Lead", email: "marketing@levelshift.com", status: "Invited", lastActive: "Invite sent" },
+  { id: "tom", name: "Tom Smith", initials: "TS", role: "Grammar / Quality Reviewer", email: "tom.smith@levelshift.com", status: "Active", lastActive: "2 days ago" },
 ];
 
 export const roleTypes: { name: Role; gate: string; description: string }[] = [

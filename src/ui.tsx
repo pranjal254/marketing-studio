@@ -7,7 +7,7 @@ function useEscape(onClose: () => void) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 }
-import { ArrowSquareOut, ArrowsClockwise, Microphone, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, ArrowsClockwise, CaretDown, Microphone, X } from "@phosphor-icons/react";
 import { useRef } from "react";
 import type { Asset, AssetState, CampaignState, TelemetryEvent } from "./types";
 import { agentMeta, fullStamp, stampTime } from "./data";
@@ -126,6 +126,79 @@ export function Modal({ title, onClose, children, wide, xl }: { title: string; o
         <div className="modal-head"><h2>{title}</h2><button className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button></div>
         <div className="modal-body">{children}</div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- MultiSelect: checkbox dropdown with removable chips ----------
+   Mobile-first: full-width trigger, large touch targets, closes on Escape and
+   outside click; selected values render as chips inside the trigger. */
+export function MultiSelect({
+  id,
+  options,
+  value,
+  onChange,
+  placeholder = "Select…",
+}: {
+  id?: string;
+  options: string[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEscape(() => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const toggle = (option: string) =>
+    onChange(value.includes(option) ? value.filter((v) => v !== option) : [...value, option]);
+  return (
+    <div className={`multiselect${open ? " open" : ""}`} ref={rootRef}>
+      <button
+        type="button" id={id} className="multiselect-trigger"
+        aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        {value.length === 0 ? (
+          <span className="multiselect-placeholder">{placeholder}</span>
+        ) : (
+          <span className="multiselect-chips">
+            {value.map((v) => (
+              <span key={v} className="multiselect-chip">
+                {v}
+                <span
+                  role="button" tabIndex={0} aria-label={`Remove ${v}`}
+                  onClick={(e) => { e.stopPropagation(); toggle(v); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); toggle(v); } }}
+                >
+                  <X size={11} />
+                </span>
+              </span>
+            ))}
+          </span>
+        )}
+        <CaretDown size={13} className="multiselect-caret" />
+      </button>
+      {open && (
+        <div className="multiselect-menu" role="listbox" aria-multiselectable="true">
+          {options.map((option) => (
+            <label key={option} className="multiselect-option" role="option" aria-selected={value.includes(option)}>
+              <input
+                type="checkbox" checked={value.includes(option)}
+                onChange={() => toggle(option)}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { openTasksFor, personById, slaInfo, useStore } from "../store";
 import { briefFraming, fullStamp, stampTime } from "../data";
 import { liveApi, type LiveCaseDetail } from "../live";
 import { LiveFlagshipConfirm, LivePlanReview } from "../boxPanels";
+import { GateTaskDetail } from "../gatePanel";
 import { useNav } from "../nav";
 import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, DocView, Menu, MicButton, MiniSource, Monogram } from "../ui";
 import type { Asset, Campaign, Task } from "../types";
@@ -30,7 +31,7 @@ export default function ApprovalsScreen() {
       <div className="approval-layout">
         <aside className="approval-queue">
           <div className="queue-heading"><h2>My queue</h2><span>{myTasks.length} open</span></div>
-          {myTasks.length === 0 && <div className="queue-empty"><p>No open tasks for {viewer.name}.</p><p>Switch person via the profile menu to see other queues.</p></div>}
+          {myTasks.length === 0 && <div className="queue-empty"><p>No open tasks for {viewer.name}.</p></div>}
           {myTasks.map((task) => {
             const campaign = state.campaigns.find((c) => c.id === task.campaignId);
             return (
@@ -78,6 +79,7 @@ export default function ApprovalsScreen() {
       {reviewWatch.some((t) => t.assigneeId === viewer.id) && (
         <p className="sla-note">Reviews assigned to you appear in your queue above; completing them clears the watch row.</p>
       )}
+
     </div>
   );
 }
@@ -91,6 +93,18 @@ function TaskDetail({ task }: { task: Task }) {
   if (task.kind === "conflict") return <ConflictDetail task={task} />;
   if (task.kind === "gaps") return <GapsDetail task={task} />;
   if (task.kind === "review") return <ReviewDetail task={task} />;
+
+  /* Live Quality Gate reviews (Grammar QA per asset, BU Lead package sign-off):
+     mirrored from the real agent into this queue; the decision goes to the
+     bridge, identity-stamped, exactly like every other live gate. */
+  if ((task.kind === "grammar_qa" || task.kind === "package_signoff") && task.liveCaseId) {
+    return (
+      <section className="approval-detail">
+        <div className="approval-detail-head"><div><div className="title-line"><h2>{task.title}</h2><CampaignStateChip state={campaign.state} /></div><p>{campaign.name} · {task.detail}</p></div></div>
+        <GateTaskDetail task={task} />
+      </section>
+    );
+  }
 
   /* Flagship content-confirm: the Content Writer's gate (step 04), backed by the
      real Content Repurposing agent. The live draft + confirm are embedded here so
