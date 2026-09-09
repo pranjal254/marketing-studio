@@ -577,7 +577,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
     if (draft.kind === "flagship") classes.push("flagship");
     if (withheld) classes.push("withheld");
     return (
-      <article className={classes.join(" ")} key={draft.asset_id}>
+      <article className={classes.join(" ")} key={draft.asset_id} id={`asset-card-${draft.asset_id}`}>
         <div className="box-asset-head">
           <Chip tone={withheld ? "amber" : "green"}>{withheld ? "withheld" : `v${draft.version}`}</Chip>
           <strong>{draft.title}</strong>
@@ -665,7 +665,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   }
 
   return (
-    <section className="box-production-card">
+    <section className="box-production-card" id="content-production">
       <div className="panel-heading">
         <div>
           <p className="meta-label">Production status · live agent</p>

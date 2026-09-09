@@ -7,46 +7,88 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowSquareOut, CheckCircle, LockSimple, SealCheck, ShieldCheck, WarningCircle, XCircle,
+  ArrowRight, ArrowSquareOut, CheckCircle, LockSimple, SealCheck, ShieldCheck,
+  WarningCircle, XCircle,
 } from "@phosphor-icons/react";
 import {
   buildBoxSync, liveApi, LiveApiError,
   type BoxDetail, type GateDetail, type GateFinding, type GateReport, type GateTask,
 } from "./live";
 import { useStore } from "./store";
-import { useNav } from "./nav";
 import { BusyButton, Chip } from "./ui";
 import type { Campaign, Task } from "./types";
 
 /* Plain-language "what happens next" for whoever is looking at the gate, keyed on
    where the package is in the flow. The gate is a loop, not a verdict, so every
    state points at the concrete next action and who owns it. */
+type FailedAsset = { assetId: string; name: string; blocking: number; advisory: number };
+
 function GateNextSteps({
   status,
-  failedCount,
+  failedAssets,
   openAssetReviews,
   hasPackageTask,
+  canProduce,
+  onFixAsset,
+  onReRun,
   onGoToProduction,
 }: {
   status: string;
-  failedCount: number;
+  failedAssets: FailedAsset[];
   openAssetReviews: number;
   hasPackageTask: boolean;
+  canProduce: boolean;
+  onFixAsset: (assetId: string) => void;
+  onReRun: () => void;
   onGoToProduction: () => void;
 }) {
   if (status === "gate_failed") {
+    const totalBlocking = failedAssets.reduce((n, a) => n + a.blocking, 0);
     return (
       <div className="gate-next tone-red">
-        <strong>What happens next</strong>
+        <strong>This package can&apos;t pass yet — here&apos;s exactly what to fix</strong>
         <p>
-          {failedCount} asset{failedCount === 1 ? "" : "s"} did not pass and {failedCount === 1 ? "was" : "were"} sent
-          back to the content team with the findings below (they appear as review
-          comments on each draft). The writers fix them (a revision round or a
-          rework), re-confirm, re-package, then you <strong>re-run the quality gate</strong>.
+          {totalBlocking} blocking issue{totalBlocking === 1 ? "" : "s"} across{" "}
+          {failedAssets.length} asset{failedAssets.length === 1 ? "" : "s"} must be
+          resolved before the gate can pass. Advisory notes are suggestions and don&apos;t
+          block. The exact findings are already waiting as review comments on each draft.
         </p>
-        <button type="button" className="secondary-button" onClick={onGoToProduction}>
-          Go to content production
-        </button>
+        {canProduce ? (
+          <ol className="gate-steps">
+            <li>Open each asset below and fix its blocking findings. The quickest way is the
+              <strong> Rework using this feedback</strong> button on the draft, which pre-fills the
+              agent with the findings so you can edit and regenerate.</li>
+            <li>Re-confirm the reworked assets, then <strong>Run packaging</strong> again in Content production.</li>
+            <li>Come back here and <strong>Re-run the quality gate</strong>.</li>
+          </ol>
+        ) : (
+          <p className="gate-role-note">
+            The assets are back with the content writers to fix. You&apos;ll be notified when
+            they&apos;ve reworked and re-packaged, and the gate can be re-run.
+          </p>
+        )}
+        <div className="gate-fix-list">
+          {failedAssets.map((a) => (
+            <button key={a.assetId} type="button" className="gate-fix-item"
+              onClick={() => onFixAsset(a.assetId)}>
+              <span className="gate-fix-name">{a.name}</span>
+              <span className="gate-fix-count">
+                {a.blocking} to fix{a.advisory > 0 ? ` · ${a.advisory} optional` : ""}
+              </span>
+              <ArrowRight size={14} weight="bold" />
+            </button>
+          ))}
+        </div>
+        {canProduce && (
+          <div className="gate-next-actions">
+            <button type="button" className="secondary-button" onClick={onGoToProduction}>
+              Go to content production
+            </button>
+            <button type="button" className="text-link" onClick={onReRun}>
+              I&apos;ve already reworked and re-packaged — re-run the gate
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -66,14 +108,16 @@ function GateNextSteps({
   if (status === "returned") {
     return (
       <div className="gate-next tone-amber">
-        <strong>What happens next</strong>
+        <strong>A reviewer sent assets back for changes</strong>
         <p>
-          A reviewer returned assets for changes. They are back with the content team;
-          once reworked and re-packaged, re-run the quality gate.
+          The returned assets are back with the content writers. Once they&apos;ve reworked
+          and re-packaged, re-run the quality gate.
         </p>
-        <button type="button" className="secondary-button" onClick={onGoToProduction}>
-          Go to content production
-        </button>
+        {canProduce && (
+          <button type="button" className="secondary-button" onClick={onGoToProduction}>
+            Go to content production
+          </button>
+        )}
       </div>
     );
   }
@@ -205,7 +249,6 @@ export function LiveGatePanel({
   context?: "campaign" | "approvals";
 }) {
   const { state: appState, actions, viewer, showToast } = useStore();
-  const { go } = useNav();
   const nameFor = (email: string) =>
     appState.people.find((p) => p.email === email)?.name ?? email;
   const boxId = campaign.liveCampaignId;
@@ -299,6 +342,27 @@ export function LiveGatePanel({
       .filter((f) => f.severity === "blocking" || f.severity === "advisory")
       .map((f) => f.rule_id);
 
+  // Content production is on the same tab, so the "fix this" jumps are in-page
+  // scrolls (with a brief flash), not navigation — the old button routed to the
+  // URL we were already on and did nothing.
+  const canProduce = viewer.role === "Content Writer" || viewer.role === "AiCoE Admin";
+  const failedAssets: FailedAsset[] = reports
+    .filter((r) => r.verdict === "fail")
+    .map((r) => ({
+      assetId: r.asset_id,
+      name: r.asset_id.replace(/_/g, " "),
+      blocking: r.findings.filter((f) => f.severity === "blocking").length,
+      advisory: r.findings.filter((f) => f.severity === "advisory").length,
+    }));
+
+  const flashIntoView = (id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("asset-flash");
+    window.setTimeout(() => el.classList.remove("asset-flash"), 1600);
+  };
+
   return (
     <section className="panel gate-panel">
       <header className="gate-head">
@@ -358,10 +422,13 @@ export function LiveGatePanel({
       {state && (
         <GateNextSteps
           status={state.status}
-          failedCount={(state.failed_asset_ids ?? []).length}
+          failedAssets={failedAssets}
           openAssetReviews={assetTasksOpen.length}
           hasPackageTask={Boolean(packageTask)}
-          onGoToProduction={() => go({ page: "campaigns", campaignId: campaign.id })}
+          canProduce={canProduce}
+          onFixAsset={(assetId) => flashIntoView(`asset-card-${assetId}`)}
+          onReRun={() => void run("run", () => liveApi.boxGateRun(boxId), "Quality gate complete")}
+          onGoToProduction={() => flashIntoView("content-production")}
         />
       )}
 
