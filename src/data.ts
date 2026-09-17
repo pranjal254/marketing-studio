@@ -53,7 +53,7 @@ export const governance = {
 
 export const journeySteps: { n: number; title: string; owner: string; agent: AgentKey | "human"; gate: string; phase: number }[] = [
   { n: 1, title: "Campaign request intake", owner: "Campaign Identification", agent: "CI", gate: "BU Lead approves brief", phase: 0 },
-  { n: 2, title: "Audience & offer", owner: "Campaign-in-a-Box", agent: "CB", gate: "Marketing confirms pack", phase: 0 },
+  { n: 2, title: "Audience & offer", owner: "Campaign-in-a-Box", agent: "CB", gate: "BU Campaign Lead confirms pack & plan", phase: 0 },
   { n: 3, title: "Asset plan & workflow", owner: "Campaign-in-a-Box", agent: "CB", gate: "Owners confirmed", phase: 0 },
   { n: 4, title: "Content drafting", owner: "Content Repurposing", agent: "CR", gate: "Flagship confirmed", phase: 1 },
   { n: 5, title: "Collaboration & iteration", owner: "Collaboration Agent", agent: "CO", gate: "Marketing Lead decision", phase: 1 },

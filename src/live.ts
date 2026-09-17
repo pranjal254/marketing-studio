@@ -380,6 +380,13 @@ export const liveApi = {
 
   listCases: () => call<LiveCaseSummary[]>("/api/cases"),
 
+  /* Workspace-level campaign delete: an append-only archive on the bridge (the
+     audit trail survives); every browser's boot reconciliation then drops it. */
+  archiveCase: (caseId: string, actorId: string, actorRole: string) =>
+    call<{ case_id: string; status: string }>(
+      `/api/cases/${caseId}?actor_id=${encodeURIComponent(actorId)}&actor_role=${encodeURIComponent(actorRole)}`,
+      { method: "DELETE" }),
+
   /* Agentic fix for an escalated case's request text: the agent rewrites with
      minimal edits and its output is verified deterministically on the bridge. */
   suggestFix: (caseId: string) =>

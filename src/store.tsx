@@ -228,6 +228,7 @@ type Store = {
     markAllRead: () => void;
     submitRequest: (form: IntakeForm) => string;
     mirrorLiveBrief: (input: MirrorLiveBrief) => void;
+    deleteCampaign: (campaignId: string) => void;
     draftBrief: (description: string, derived: DerivedBrief) => string;
     reviseBrief: (campaignId: string, aspects: string[], note: string) => void;
     updateBrief: (campaignId: string, patch: Partial<Campaign>) => void;
@@ -423,6 +424,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         notify(lead.id, `${input.name} brief (live agent) is ready for your approval`, input.caseId);
       }
+    },
+
+    /* Local removal after the bridge archived the case — tasks go with it. */
+    deleteCampaign: (campaignId) => {
+      dispatch({ type: "CAMPAIGN_REMOVE", id: campaignId });
     },
 
     /* ---- AI-first intake: the agent drafts, the Marketing Lead verifies and iterates,

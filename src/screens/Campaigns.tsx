@@ -6,7 +6,7 @@ import { flagshipDoc, fullStamp, journeySteps, phaseLabels, stampTime, toneVars 
 import { LiveBoxPackPanel, LiveProductionPanel } from "../boxPanels";
 import { LiveGatePanel } from "../gatePanel";
 import { useNav } from "../nav";
-import { AssetStateChip, Avatar, CampaignStateChip, Chip, DocModal, Menu, MiniSource, Monogram, ProgressSteps, agentName } from "../ui";
+import { AssetStateChip, Avatar, BusyButton, CampaignStateChip, Chip, DocModal, Menu, MiniSource, Modal, Monogram, ProgressSteps, agentName } from "../ui";
 import type { Asset, Campaign } from "../types";
 import { InlineDots } from "../loaders";
 
@@ -189,10 +189,35 @@ function AdoptLiveCampaign({ caseId }: { caseId: string }) {
 }
 
 function CampaignDetail({ campaign }: { campaign: Campaign }) {
-  const { state, now, viewer, openTrace } = useStore();
+  const { state, now, viewer, actions, openTrace } = useStore();
   const { go } = useNav();
   const [tab, setTab] = useState<"journey" | "plan" | "content">("journey");
   const [docAsset, setDocAsset] = useState<Asset | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  // Deleting a campaign is a workspace decision: Marketing Lead (or AiCoE).
+  // The bridge archives the case append-only (audit trail kept), then every
+  // browser's boot reconciliation drops it.
+  const canDelete = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+  async function deleteCampaign() {
+    setDeleting(true); setDeleteError("");
+    const caseId = campaign.liveCaseId ?? campaign.id;
+    try {
+      const { liveApi } = await import("../live");
+      await liveApi.archiveCase(caseId, viewer.email, viewer.role);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // A case the bridge never knew (pure local mirror) can be removed locally.
+      if (!/unknown case/i.test(message)) {
+        setDeleteError(message); setDeleting(false);
+        return;
+      }
+    }
+    actions.deleteCampaign(campaign.id);
+    setDeleting(false); setConfirmDelete(false);
+    go("campaigns");
+  }
   const cost = campaignCost(state, campaign.id);
   const assets = state.assets.filter((a) => a.campaignId === campaign.id);
   const openTasks = state.tasks.filter((t) => t.campaignId === campaign.id && t.status === "open");
@@ -208,6 +233,29 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
         <div className="campaign-title-block"><Monogram size="lg">{campaign.code}</Monogram><div><div className="title-line"><h1>{campaign.name}</h1><CampaignStateChip state={campaign.state} /></div><p>{campaign.vertical} {campaign.campaignType.toLowerCase()} · {campaign.window.start} to {campaign.window.end}</p></div></div>
         <div className="header-actions">
           <button className="secondary-button" onClick={() => { navigator.clipboard?.writeText(`${campaign.name}: step ${campaign.step} of 9, ${campaign.state.replace(/_/g, " ")}, AI cost $${cost.toFixed(2)}, ${openTasks.length} open gate(s).`); }}>Copy summary</button>
+          {canDelete && (
+            <button className="secondary-button danger-button" onClick={() => { setDeleteError(""); setConfirmDelete(true); }}>
+              Delete campaign
+            </button>
+          )}
+          {confirmDelete && (
+            <Modal title="Delete this campaign?" onClose={() => { if (!deleting) setConfirmDelete(false); }}>
+              <p className="live-note-plain">
+                "{campaign.name}" will be removed from every workspace view and its
+                calendar slot freed. The audit trail (decisions, telemetry) is kept
+                on record — nothing is physically erased.
+              </p>
+              {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
+              <div className="modal-actions">
+                <button type="button" className="secondary-button" disabled={deleting}
+                  onClick={() => setConfirmDelete(false)}>Keep it</button>
+                <BusyButton busy={deleting} busyLabel="Removing…" disabled={deleting}
+                  onClick={() => void deleteCampaign()}>
+                  Delete campaign
+                </BusyButton>
+              </div>
+            </Modal>
+          )}
           {myTask && <button className="primary-button" onClick={() => go({ page: "approvals", taskId: myTask.id })}>Open your task</button>}
         </div>
       </section>
