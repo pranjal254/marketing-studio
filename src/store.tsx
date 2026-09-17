@@ -3,7 +3,7 @@ import type {
   AppState, ApprovalRecord, Asset, Campaign, Notification, Person, Task, TelemetryEvent,
 } from "./types";
 import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor, type DerivedBrief } from "./data";
-import { buildBoxSync, liveApi, LiveApiError, type BoxSyncInput } from "./live";
+import { SEGMENT_LABEL, VERTICAL_LABEL, buildBoxSync, liveApi, LiveApiError, type BoxSyncInput } from "./live";
 import { DEFAULT_PASSWORD, isAdmin } from "./access";
 
 const AUTH_KEY = "shiftai.auth";
@@ -998,6 +998,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // fetch: an offline bridge keeps the mirror untouched.
     void liveApi.listCases()
       .then((cases) => {
+        // Prune: a mirrored live campaign the DB no longer knows is removed.
         const known = new Set(cases.map((c) => c.case_id));
         for (const c of state.campaigns) {
           const liveId = c.liveCampaignId ?? (c.id.startsWith("case_") ? c.id : null);
@@ -1005,8 +1006,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             dispatch({ type: "CAMPAIGN_REMOVE", id: c.id });
           }
         }
+        // Adopt: every campaign the DB knows that this browser has never seen
+        // appears in the list too — awaiting-approval cases with their approval
+        // task, approved ones in planning state (the reconciliation loop then
+        // syncs their live box state). Escalated/draft cases are not campaigns
+        // yet; they live on the intake and Live agents screens.
+        const mirrored = new Set(state.campaigns.map((c) => c.id));
+        const labels = (raw: string | null | undefined, map: Record<string, string>) =>
+          (raw ?? "").split(",").map((t) => t.trim()).filter(Boolean)
+            .map((slug) => map[slug] ?? slug).join(", ");
+        for (const c of cases) {
+          if (mirrored.has(c.case_id)) continue;
+          if (c.status !== "awaiting_approval" && c.status !== "approved") continue;
+          const r = c.request;
+          actions.mirrorLiveBrief({
+            caseId: c.case_id,
+            name: r?.offer_topic || c.topic || "Campaign",
+            objective: r?.objective ?? "",
+            topic: r?.offer_topic ?? c.topic ?? "",
+            bu: r?.business_unit ?? c.business_unit ?? "",
+            vertical: labels(r?.vertical ?? c.vertical, VERTICAL_LABEL),
+            segment: labels(r?.target_segment, SEGMENT_LABEL),
+            channels: r?.channels ?? [],
+            window: { start: r?.timeline_start ?? "", end: r?.timeline_end ?? "" },
+            budgetApproved: r?.budget_flag === true,
+            request: r?.free_text_context ?? "",
+            briefVersion: `v${c.brief_version ?? 1}`,
+            approved: c.status === "approved",
+          });
+        }
       })
-      .catch(() => { /* bridge offline — never prune blind */ });
+      .catch(() => { /* bridge offline — never prune or adopt blind */ });
     void liveApi.listUsers()
       .then((users) => {
         if (users.length === 0) return;
