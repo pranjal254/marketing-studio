@@ -15,6 +15,24 @@ export default function CampaignsScreen() {
   const { nav, go } = useNav();
   const selected = nav.campaignId ? state.campaigns.find((c) => c.id === nav.campaignId) : undefined;
   if (selected) return <CampaignDetail campaign={selected} />;
+  if (nav.campaignId) {
+    // A deep link to a campaign this browser hasn't mirrored (or one removed
+    // when the workspace data was reset) — say so instead of a bare list.
+    return (
+      <div className="screen-content campaigns-screen">
+        <section className="simple-page-header">
+          <div><h1>Campaign not found</h1>
+            <p>This campaign isn&apos;t in your workspace view — it may have been removed
+              when the workspace data was reset, or it was created in another browser.
+              Approvals still reach the right people either way.</p></div>
+        </section>
+        <div className="intake-result-actions">
+          <button className="primary-button" onClick={() => go("campaigns")}>All campaigns</button>
+          <button className="secondary-button" onClick={() => go("approvals")}>Open Approvals</button>
+        </div>
+      </div>
+    );
+  }
 
   const ordered = [...state.campaigns].sort((a, b) => (a.state === "approved_locked" ? 1 : 0) - (b.state === "approved_locked" ? 1 : 0) || b.step - a.step);
   const canRequest = canAccess(viewer.role, "intake");

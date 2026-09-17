@@ -980,6 +980,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (usersLoaded.current) return;
     usersLoaded.current = true;
+    // The workspace DB (via the bridge) is the source of truth for live
+    // campaigns; localStorage is only a cache. On boot, prune any mirrored
+    // live campaign the bridge no longer knows — a wiped or reset database
+    // must never be resurrected from the browser. Runs only on a successful
+    // fetch: an offline bridge keeps the mirror untouched.
+    void liveApi.listCases()
+      .then((cases) => {
+        const known = new Set(cases.map((c) => c.case_id));
+        for (const c of state.campaigns) {
+          const liveId = c.liveCampaignId ?? (c.id.startsWith("case_") ? c.id : null);
+          if (liveId && !known.has(liveId)) {
+            dispatch({ type: "CAMPAIGN_REMOVE", id: c.id });
+          }
+        }
+      })
+      .catch(() => { /* bridge offline — never prune blind */ });
     void liveApi.listUsers()
       .then((users) => {
         if (users.length === 0) return;
@@ -993,6 +1009,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
       })
       .catch(() => { /* offline: keep the local seed */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once with the hydrated snapshot
   }, []);
 
   /* Reconciliation: a live campaign left in "planning" with no open plan_confirm

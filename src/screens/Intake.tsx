@@ -6,7 +6,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowRight, ArrowsClockwise, FileText, PaperPlaneTilt, Plugs, Trash, WarningCircle,
+  ArrowRight, ArrowsClockwise, FileText, PaperPlaneTilt, Plugs, Trash, UploadSimple,
+  WarningCircle,
 } from "@phosphor-icons/react";
 import { useStore } from "../store";
 import { useNav } from "../nav";
@@ -16,7 +17,7 @@ import { InlineDots } from "../loaders";
 import {
   CHANNEL_SLUG, LIVE_API, SEGMENT_LABEL, SEGMENT_SLUG, VERTICAL_LABEL, VERTICAL_SLUG,
   authHeaders, channelChecked, liveApi, stsMeta, stsSummary,
-  type EscalationOption, type LiveCaseDetail, type StsRecord,
+  type EscalationHelp, type EscalationOption, type LiveCaseDetail, type StsRecord,
 } from "../live";
 
 const STORAGE_KEY = "shiftai.live.intake";
@@ -26,12 +27,20 @@ const DRAFT_KEY = "shiftai.live.intake.draft"; // form edits + description survi
 // reloads and directive rounds — the user never re-types what they already gave
 const channelOptions = Object.keys(CHANNEL_SLUG);
 const BRIEF_ASPECTS = ["Executive angle", "Practical angle", "Tighter objective", "Stronger offer"];
-const EXAMPLES = [
-  "Build cloud migration intent with financial services CFOs on LinkedIn and email nurture, anchored on our BC delivery experience",
-  "Launch an AI readiness webinar campaign for manufacturing operations leaders, with sales enablement and a landing page",
-];
+// Brief upload formats (kept in sync with the agent's ingest module, 5 MB cap).
+const UPLOAD_EXTENSIONS = [".docx", ".xlsx", ".pdf", ".md", ".markdown"];
 
 type Phase = "checking" | "offline" | "describe" | "drafting" | "review" | "sent" | "escalated";
+
+function phaseForStatus(status: string): Phase {
+  switch (status) {
+    case "awaiting_input":
+    case "draft_review": return "review";
+    case "awaiting_approval": return "sent";
+    case "escalated": return "escalated";
+    default: return "describe"; // approved/rejected/failed → this draft is finished
+  }
+}
 
 type FormState = {
   objective: string; topic: string; bu: string; vertical: string[]; segment: string[];
@@ -111,7 +120,8 @@ function answersFromForm(form: FormState): Record<string, string> {
   return answers;
 }
 
-/* Everything the directive round may have changed, for the deltas modal. */
+/* Everything a directive or escalation-resolution round may have changed, for
+   the deltas modal — nothing happens in the dark. */
 type FieldDelta = { label: string; before: string; after: string };
 
 function requestDeltas(
@@ -122,7 +132,8 @@ function requestDeltas(
     ["objective", "Objective"], ["offer_topic", "Offer / topic"],
     ["business_unit", "Business unit"], ["vertical", "Vertical"],
     ["target_segment", "Target segment"], ["timeline_start", "Window start"],
-    ["timeline_end", "Window end"],
+    ["timeline_end", "Window end"], ["products", "Product scope"],
+    ["scope_ack", "Scope decision"], ["compliance_ack", "Compliance confirmation"],
   ];
   const read = (r: typeof before, key: string): string => {
     const v = (r as Record<string, unknown> | null | undefined)?.[key];
@@ -140,6 +151,101 @@ function requestDeltas(
   return deltas;
 }
 
+/* Fix the escalated request's text without leaving the escalation card. Agentic
+   first: one click has the agent rewrite the flagged wording (minimal edits,
+   verified deterministically on the bridge), with every flagged term highlighted
+   IN the text so nobody hunts for it. For a compliance flag the resubmit stays
+   disabled until every flagged term is gone. */
+function FixTextModal({ help, draft, onDraft, busy, scrubbing, changes, error,
+  onAgentFix, onResubmit, onClose }: {
+  help: EscalationHelp; draft: string; onDraft: (text: string) => void;
+  busy: boolean; scrubbing: boolean; changes: string[]; error: string;
+  onAgentFix: () => void; onResubmit: () => void; onClose: () => void;
+}) {
+  const backdrop = useRef<HTMLDivElement | null>(null);
+  const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const stillPresent = help.evidence.filter((term) =>
+    new RegExp(`\\b${escapeRe(term)}\\b`, "i").test(draft));
+  // Compliance flags are strict: the flagged wording must actually be gone.
+  // Other flags (e.g. product scope) keep the highlights as guidance only.
+  const strict = help.reason_code === "compliance_ceiling";
+  const blocked = strict && stillPresent.length > 0;
+
+  // The draft split around flagged-term hits, rendered as a backdrop under a
+  // transparent-background textarea — the highlights live in the text itself.
+  const parts: { text: string; hit: boolean }[] = [];
+  if (help.evidence.length > 0) {
+    const re = new RegExp(`\\b(${help.evidence.map(escapeRe).join("|")})\\b`, "gi");
+    let last = 0;
+    for (const m of draft.matchAll(re)) {
+      const at = m.index ?? 0;
+      if (at > last) parts.push({ text: draft.slice(last, at), hit: false });
+      parts.push({ text: m[0], hit: true });
+      last = at + m[0].length;
+    }
+    parts.push({ text: draft.slice(last), hit: false });
+  } else {
+    parts.push({ text: draft, hit: false });
+  }
+
+  return (
+    <Modal title="Fix the request text" onClose={() => { if (!busy) onClose(); }}>
+      <p className="fix-text-why">{help.title}. The flagged wording is highlighted
+        in your text below.</p>
+      <div className="fix-agent-row">
+        <BusyButton busy={scrubbing} busyLabel="The agent is rewriting…"
+          disabled={busy || stillPresent.length === 0} onClick={onAgentFix}>
+          Let the agent fix it
+        </BusyButton>
+        <small>Minimal edits, nothing added — you review the result before resubmitting.</small>
+      </div>
+      {changes.length > 0 && (
+        <ul className="fix-changes">
+          {changes.map((c) => <li key={c}>{c}</li>)}
+        </ul>
+      )}
+      <div className="fix-terms">
+        {help.evidence.map((term) => {
+          const still = stillPresent.includes(term);
+          return (
+            <span key={term} className={`fix-term ${still ? "still" : "cleared"}`}>
+              {still ? "still in the text: " : "cleared: "}{term}
+            </span>
+          );
+        })}
+      </div>
+      <div className="fix-editor">
+        <div className="fix-editor-backdrop" ref={backdrop} aria-hidden="true">
+          {parts.map((p, i) => p.hit
+            ? <mark key={`${i}-${p.text}`}>{p.text}</mark>
+            : <span key={`${i}-s`}>{p.text}</span>)}
+          {"\n"}
+        </div>
+        <textarea className="fix-text-area" rows={10} value={draft} disabled={busy}
+          onChange={(e) => onDraft(e.target.value)}
+          onScroll={(e) => {
+            if (backdrop.current) {
+              backdrop.current.scrollTop = e.currentTarget.scrollTop;
+              backdrop.current.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }} />
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="modal-actions">
+        <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <BusyButton busy={busy && !scrubbing} busyLabel="The agent is re-checking…"
+          disabled={blocked || busy} onClick={onResubmit}>
+          {blocked
+            ? `Remove ${stillPresent.length} flagged term${stillPresent.length === 1 ? "" : "s"} to resubmit`
+            : "Resubmit — the agent re-checks"}
+        </BusyButton>
+      </div>
+    </Modal>
+  );
+}
+
 export default function IntakeScreen() {
   const { viewer, actions } = useStore();
   const { go } = useNav();
@@ -153,6 +259,12 @@ export default function IntakeScreen() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
+  // The "fix the request text" modal on an escalated case: validated in place
+  // (flagged terms must clear before resubmit), resumes the SAME case.
+  const [fixTextOpen, setFixTextOpen] = useState(false);
+  const [fixDraft, setFixDraft] = useState("");
+  const [fixChanges, setFixChanges] = useState<string[]>([]);
+  const [scrubbing, setScrubbing] = useState(false);
   const [error, setError] = useState("");
   // Result of the latest directive round: which draft fields the agent actually
   // rewrote (so the change is visible in place, not implied).
@@ -197,13 +309,7 @@ export default function IntakeScreen() {
     setDetail(d);
     setForm(mergeForm(formFromDetail(d), readDraft()?.form ?? null));
     void refreshEvents(d.summary.trace_id);
-    switch (d.summary.status) {
-      case "awaiting_input":
-      case "draft_review": return "review";
-      case "awaiting_approval": return "sent";
-      case "escalated": return "escalated";
-      default: return "describe"; // approved/rejected/failed → this draft is finished
-    }
+    return phaseForStatus(d.summary.status);
   }, [refreshEvents]);
 
   /* connect: bridge health, then resume any in-flight intake case. A pending-submit
@@ -310,6 +416,35 @@ export default function IntakeScreen() {
     }
   }
 
+  /* Uploaded .docx/.xlsx brief: the bridge parses it locally (no LLM) into the
+     same normalized text a typed description uses, then the identical intake
+     pipeline runs — one code path, provenance and gaps included. */
+  async function uploadBriefFile(file: File) {
+    const name = file.name.toLowerCase();
+    if (!UPLOAD_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+      setError("Only Word (.docx), Excel (.xlsx), PDF (.pdf) and Markdown (.md) briefs are supported.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("That file is over 5 MB. Save the brief's text itself (.docx, .xlsx, .pdf or .md) and try again.");
+      return;
+    }
+    setError("");
+    setPhase("drafting");
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify({ ts: Date.now() })); } catch { /* fine */ }
+    try {
+      const outcome = await liveApi.uploadBrief(file, viewer.email);
+      try { localStorage.removeItem(PENDING_KEY); } catch { /* fine */ }
+      rememberCase(outcome.case_id);
+      const next = await loadCase(outcome.case_id);
+      setPhase(next === "describe" ? "escalated" : next);
+    } catch (e) {
+      try { localStorage.removeItem(PENDING_KEY); } catch { /* fine */ }
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("describe");
+    }
+  }
+
   async function sendDirective() {
     if (!caseId) return;
     if (aspects.length === 0 && !note.trim()) {
@@ -398,6 +533,42 @@ export default function IntakeScreen() {
     } finally { setBusy(false); }
   }
 
+  /* After any escalation round (one-click resolve or a text edit), refresh the
+     case, show EXACTLY what changed in the deltas modal, and land on the phase
+     the new status calls for — the user is never in the dark about what the
+     agent just did. */
+  async function finishEscalationRound(
+    id: string,
+    before: LiveCaseDetail["summary"]["request"] | null,
+  ) {
+    const d = await liveApi.getCase(id);
+    setDetail(d);
+    setForm(mergeForm(formFromDetail(d), readDraft()?.form ?? null));
+    void refreshEvents(d.summary.trace_id);
+    setDirectiveDeltas(requestDeltas(before, d.summary.request));
+    if (d.summary.status === "awaiting_approval") {
+      // The resolution routed the brief (non-hold case): mirror the campaign so
+      // "View campaign" and the Campaigns list work exactly as after send().
+      const r = d.summary.request;
+      actions.mirrorLiveBrief({
+        caseId: id,
+        name: r?.offer_topic || "New campaign",
+        objective: r?.objective ?? "",
+        topic: r?.offer_topic ?? "",
+        bu: r?.business_unit ?? "",
+        vertical: labelsFromSlugs(r?.vertical, VERTICAL_LABEL).join(", "),
+        segment: labelsFromSlugs(r?.target_segment, SEGMENT_LABEL).join(", "),
+        channels: channelOptions.filter((label) => channelChecked(r?.channels ?? [], label)),
+        window: { start: r?.timeline_start ?? "", end: r?.timeline_end ?? "" },
+        budgetApproved: r?.budget_flag === true,
+        request: r?.free_text_context ?? "",
+        briefVersion: `v${d.summary.brief_version ?? 1}`,
+      });
+      clearDraft();
+    }
+    setPhase(phaseForStatus(d.summary.status));
+  }
+
   /* One-click resolution of an escalated case: the option's field patch (plus the
      resolver's identity, stamped into the acknowledgment) resumes the SAME case in
      the same trace. The agent re-runs its checks; a fixed case lands back in
@@ -413,13 +584,58 @@ export default function IntakeScreen() {
     }
     if (option.id === "scope_bc") patch.scope_ack = `Business Central-only scope confirmed by ${stamp}`;
     if (option.id === "scope_fo") patch.scope_ack = `F&O-only scope confirmed by ${stamp}`;
+    const before = detail?.summary.request ?? null;
     try {
       await liveApi.submitAnswers(caseId, patch, viewer.email, false);
-      const next = await loadCase(caseId);
-      setPhase(next);
+      await finishEscalationRound(caseId, before);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); setResolving(null); }
+  }
+
+  /* "Edit the request text": a validated modal over the escalation card — the
+     requester's own wording, with the flagged terms checked live. Resubmitting
+     resumes the SAME case and re-runs every check in the same trace. */
+  function startTextFix() {
+    setFixDraft(detail?.summary.request?.free_text_context ?? description);
+    setFixChanges([]);
+    setError("");
+    setFixTextOpen(true);
+  }
+
+  /* One-click agentic fix: the agent rewrites the flagged wording; the bridge
+     verifies the result deterministically before it reaches the editor. The
+     human always reviews and resubmits — the fix never applies itself. */
+  async function agentFixText() {
+    if (!caseId || busy) return;
+    setError(""); setBusy(true); setScrubbing(true);
+    try {
+      const fix = await liveApi.suggestFix(caseId);
+      setFixDraft(fix.text);
+      setFixChanges(fix.changes);
+      if (!fix.cleared) {
+        setError("The agent could not clear everything — what remains is still highlighted; adjust it and resubmit.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); setScrubbing(false); }
+  }
+
+  async function resubmitText() {
+    if (!caseId || busy) return;
+    if (fixDraft.trim().length < 20) {
+      setError("Keep enough of the request for the agent to work with — a sentence or two at least.");
+      return;
+    }
+    setError(""); setBusy(true);
+    const before = detail?.summary.request ?? null;
+    try {
+      await liveApi.submitAnswers(caseId, { free_text_context: fixDraft.trim() }, viewer.email, false);
+      setFixTextOpen(false);
+      await finishEscalationRound(caseId, before);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
   }
 
   function startOver() {
@@ -427,7 +643,7 @@ export default function IntakeScreen() {
     clearDraft();
     setDetail(null); setEvents([]); setForm(EMPTY_FORM); setDescription("");
     setAspects([]); setNote(""); setError(""); setLastDirective(null);
-    setDirectiveDeltas(null);
+    setDirectiveDeltas(null); setFixTextOpen(false);
     setPhase("describe");
   }
 
@@ -438,7 +654,7 @@ export default function IntakeScreen() {
     rememberCase(null);
     setDetail(null); setEvents([]); setForm(EMPTY_FORM);
     setAspects([]); setNote(""); setError(""); setLastDirective(null);
-    setDirectiveDeltas(null);
+    setDirectiveDeltas(null); setFixTextOpen(false);
     setDescription(original);
     setPhase("describe");
   }
@@ -522,7 +738,9 @@ export default function IntakeScreen() {
                     )
                     : (
                       <button className="secondary-button" disabled={busy}
-                        onClick={o.kind === "edit" ? () => setPhase("review") : startOver}>
+                        onClick={o.kind === "edit"
+                          ? (o.target === "text" ? startTextFix : () => setPhase("review"))
+                          : startOver}>
                         {o.label}
                       </button>
                     );
@@ -544,12 +762,19 @@ export default function IntakeScreen() {
               <p className="live-note"><WarningCircle size={14} /> This case needs a human decision. Edit the request and resubmit, or start a new one.</p>
             </div>
           )}
-          {error && <p className="live-note"><WarningCircle size={14} /> {error}</p>}
+          {error && !fixTextOpen && <p className="live-note"><WarningCircle size={14} /> {error}</p>}
           {feed}
           <div className="intake-result-actions">
             <button className="secondary-button" onClick={startOver}>Start a new request</button>
             <button className="secondary-button" onClick={() => go("live")}>Open Live agents</button>
           </div>
+          {fixTextOpen && help && (
+            <FixTextModal help={help} draft={fixDraft} onDraft={setFixDraft}
+              busy={busy} scrubbing={scrubbing} changes={fixChanges} error={error}
+              onAgentFix={() => void agentFixText()}
+              onResubmit={() => void resubmitText()}
+              onClose={() => { setFixTextOpen(false); setError(""); }} />
+          )}
         </section>
       </div>
     );
@@ -603,12 +828,14 @@ export default function IntakeScreen() {
   /* ---- review ---- */
   if (phase === "review" && detail) {
     const returnedNote = detail.summary.returned_note;
+    const escalatedNow = detail.summary.status === "escalated";
+    const reviewHelp = detail.summary.escalation_help;
     return (
       <div className="screen-content intake-screen">
         <section className="simple-page-header">
           <div><h1>Review the drafted brief</h1><p>Drafted by the live agent from your request. Fields it derived carry your own words as provenance; amber fields are still needed. Iterate, fill, then send.</p></div>
           <div className="intake-header-actions">
-            <Chip tone="blue">Case {caseId?.slice(0, 12)} · {detail.summary.status === "draft_review" ? `brief v${detail.summary.brief_version ?? 1} in draft` : "gaps open"}</Chip>
+            <Chip tone={escalatedNow ? "amber" : "blue"}>Case {caseId?.slice(0, 12)} · {detail.summary.status === "draft_review" ? `brief v${detail.summary.brief_version ?? 1} in draft` : escalatedNow ? "escalated — fix, then resubmit" : "gaps open"}</Chip>
             <button type="button" className="secondary-button" onClick={rewriteBrief} disabled={busy}>
               <ArrowsClockwise size={13} /> Rewrite the brief
             </button>
@@ -619,6 +846,17 @@ export default function IntakeScreen() {
         </section>
         {returnedNote && (
           <div className="change-strip revision"><ArrowsClockwise size={14} /><p>Returned by the BU Campaign Lead: "{returnedNote}" — revise and send again.</p></div>
+        )}
+        {escalatedNow && (
+          <div className="change-strip revision">
+            <WarningCircle size={14} />
+            <p>
+              <strong>This request is escalated{reviewHelp ? `: ${reviewHelp.title}` : ""}.</strong>{" "}
+              Every field below is editable — fix the flagged issue, then resubmit.
+              The agent re-runs all its checks before anything moves on; escalation
+              cannot be skipped past.
+            </p>
+          </div>
         )}
         {lastDirective && (lastDirective.changed.length > 0 ? (
           <div className="change-strip applied">
@@ -744,20 +982,22 @@ export default function IntakeScreen() {
             </section>
 
             <section className="send-panel">
-              <h2>Send for approval</h2>
+              <h2>{escalatedNow ? "Resubmit for re-check" : "Send for approval"}</h2>
               {missing.length > 0 ? (
                 <p className="send-missing">Before this reaches the BU Campaign Lead: <strong>{missing.join(" · ")}</strong>. The agent never infers these.</p>
+              ) : escalatedNow ? (
+                <p className="send-ready">Resubmitting re-runs every policy check on this request. It routes for approval only once the flags clear (or are confirmed by the right role).</p>
               ) : (
                 <p className="send-ready">Everything is in place. Sending records your verification and routes the real approval task.</p>
               )}
               {error && <p className="form-error" role="alert">{error}</p>}
-              <button className="primary-button send-button" onClick={() => void send()} disabled={missing.length > 0 || busy} aria-busy={busy}>{busy ? <><span className="btn-spinner" aria-hidden="true" /> Sending — the agent re-validates…</> : <><ArrowRight size={15} /> Send for approval</>}</button>
+              <button className="primary-button send-button" onClick={() => void send()} disabled={missing.length > 0 || busy} aria-busy={busy}>{busy ? <><span className="btn-spinner" aria-hidden="true" /> Sending — the agent re-validates…</> : <><ArrowRight size={15} /> {escalatedNow ? "Resubmit — agent re-checks" : "Send for approval"}</>}</button>
               <button className="text-button" onClick={startOver} disabled={busy}><Trash size={13} /> Start over (draft stays archived with the agent)</button>
             </section>
           </aside>
         </div>
         {directiveDeltas && (
-          <Modal title="What your directive changed" onClose={() => setDirectiveDeltas(null)}>
+          <Modal title="What changed in this round" onClose={() => setDirectiveDeltas(null)}>
             {directiveDeltas.length === 0 ? (
               <p className="live-note">The agent reviewed your directive but changed nothing. Try a more specific instruction, for example: "rewrite the objective around qualified pipeline for mid-market plants".</p>
             ) : (
@@ -783,7 +1023,10 @@ export default function IntakeScreen() {
   /* ---- describe ---- */
   return (
     <div className="screen-content intake-screen">
-      <section className="simple-page-header"><div><h1>New campaign request</h1><p>Describe what you need; the real Campaign Identification agent drafts the brief. You verify and iterate before anything is routed.</p></div></section>
+      <section className="simple-page-header"><div>
+        <h1>New campaign request</h1>
+        <p>Describe what you need; the real Campaign Identification agent drafts the brief. You verify and iterate before anything is routed.</p>
+      </div></section>
       <section className="intake-hero">
         <label htmlFor="in-describe">Describe the campaign (type or dictate)</label>
         <div className="textarea-with-mic">
@@ -791,9 +1034,19 @@ export default function IntakeScreen() {
             placeholder="e.g. Build cloud migration intent with financial services CFOs on LinkedIn and email nurture, anchored on our BC delivery experience" />
           <MicButton onText={(t) => setDescription((prev) => prev ? `${prev} ${t}` : t)} />
         </div>
-        <div className="example-row">
-          <span>Try:</span>
-          {EXAMPLES.map((ex) => <button key={ex.slice(0, 18)} type="button" onClick={() => { setDescription(ex); setError(""); }}>{ex.split(" ").slice(0, 5).join(" ")}…</button>)}
+        <div className="intake-upload">
+          <span className="intake-upload-or">or</span>
+          <button type="button" className="secondary-button"
+            onClick={() => document.getElementById("in-upload")?.click()}>
+            <UploadSimple size={14} /> Upload a brief (.docx / .xlsx / .pdf / .md)
+          </button>
+          <small>Max 5 MB. The agent reads the whole document and drafts from its exact words.</small>
+          <input id="in-upload" type="file" accept=".docx,.xlsx,.pdf,.md,.markdown" hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // same file can be re-picked after a fix
+              if (file) void uploadBriefFile(file);
+            }} />
         </div>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="intake-hero-foot">

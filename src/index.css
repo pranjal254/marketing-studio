@@ -1585,3 +1585,44 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .escalation-options { display: flex; flex-direction: column; gap: 10px; margin-top: 2px; }
 .escalation-option { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
 .escalation-option small { font-size: 11.5px; color: var(--text-dim, #475467); }
+
+/* Upload-a-brief affordance on the intake describe step */
+.intake-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 2px; }
+.intake-upload-or { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim, #475467); }
+.intake-upload small { font-size: 11.5px; color: var(--text-dim, #475467); flex-basis: 100%; }
+@media (min-width: 640px) { .intake-upload small { flex-basis: auto; } }
+
+/* Fix-and-resubmit mode on the describe step */
+.intake-fix-actions { display: flex; gap: 8px; }
+.change-strip code {
+  font-size: 11.5px; padding: 1px 6px; border-radius: 999px; margin-left: 4px;
+  background: rgba(245,158,11,0.14); border: 1px solid rgba(245,158,11,0.3); color: #92400e;
+}
+
+/* Fix-the-text modal: flagged terms validated live against the draft */
+.fix-text-why { margin: 0 0 10px; font-size: 13px; line-height: 1.55; color: var(--text-dim, #475467); }
+.fix-terms { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.fix-term { font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+.fix-term.still { background: rgba(217,45,32,0.09); border: 1px solid rgba(217,45,32,0.3); color: #b42318; }
+.fix-term.cleared { background: rgba(18,183,106,0.09); border: 1px solid rgba(18,183,106,0.3); color: #067647; }
+.fix-text-area {
+  width: 100%; box-sizing: border-box; border: 1px solid var(--line, #e4e7ec);
+  border-radius: var(--r-control); padding: 10px 12px; font: inherit; font-size: 13px;
+  line-height: 1.55; resize: vertical; background: var(--surface, #fff);
+}
+.fix-text-area:focus { outline: 2px solid var(--accent, #0f62fe); outline-offset: -1px; }
+
+/* Agentic fix: highlight overlay under a transparent textarea + agent-fix row */
+.fix-agent-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.fix-agent-row small { font-size: 11.5px; color: var(--text-dim, #475467); }
+.fix-changes { margin: 0 0 10px; padding-left: 18px; }
+.fix-changes li { font-size: 12px; line-height: 1.5; color: #067647; }
+.fix-editor { position: relative; background: var(--surface, #fff); border-radius: var(--r-control); }
+.fix-editor-backdrop {
+  position: absolute; inset: 0; overflow: auto; pointer-events: none;
+  border: 1px solid transparent; border-radius: var(--r-control);
+  padding: 10px 12px; font: inherit; font-size: 13px; line-height: 1.55;
+  white-space: pre-wrap; word-wrap: break-word; color: transparent;
+}
+.fix-editor-backdrop mark { background: rgba(217,45,32,0.22); color: transparent; border-radius: 3px; }
+.fix-editor .fix-text-area { position: relative; background: transparent; display: block; }

@@ -49,11 +49,19 @@ export type LiveOutcome = {
   escalation_reason: string | null; doc_ref: string | null;
 };
 
+/* What the bridge read out of an uploaded .docx/.xlsx brief (never the text
+   itself — that lives on the case as free_text_context). */
+export type BriefUploadMeta = {
+  kind: "docx" | "xlsx" | "pdf" | "md"; filename: string;
+  paragraphs: number; tables: number; truncated: boolean;
+};
+
 export type LiveRequestFields = {
   requester: string | null; objective: string | null; business_unit: string | null;
   vertical: string | null; target_segment: string | null; offer_topic: string | null;
   channels: string[]; timeline_start: string | null; timeline_end: string | null;
   owner: string | null; budget_flag: boolean | null; free_text_context: string | null;
+  products: string[]; scope_ack: string | null; compliance_ack: string | null;
   derived_fields: Record<string, string>;
 };
 
@@ -63,6 +71,9 @@ export type LiveRequestFields = {
 export type EscalationOption = {
   id: string; label: string; kind: "resolve" | "edit" | "restart";
   patch: Record<string, string>; roles: string[]; note: string | null;
+  // Where an "edit" belongs: the request's own text (where flagged terms
+  // usually live) or the structured form fields. Older cases may omit it.
+  target?: "text" | "fields";
 };
 
 export type EscalationHelp = {
@@ -337,6 +348,22 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export const liveApi = {
   health: () => call<LiveHealth>("/api/health"),
 
+  /* Multipart upload — the browser sets the boundary Content-Type itself, so
+     this cannot go through call() (which forces application/json). */
+  uploadBrief: async (file: File, requesterEmail: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("requester", requesterEmail);
+    const response = await fetch(`${LIVE_API}/api/requests/upload`, {
+      method: "POST", headers: { ...authHeaders() }, body: form,
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+      throw new LiveApiError(body?.detail ?? `${response.status} ${response.statusText}`, response.status);
+    }
+    return response.json() as Promise<LiveOutcome & { upload: BriefUploadMeta }>;
+  },
+
   submitDescription: (description: string, requesterEmail: string) =>
     call<LiveOutcome>("/api/requests", {
       method: "POST",
@@ -350,6 +377,14 @@ export const liveApi = {
         },
       }),
     }),
+
+  listCases: () => call<LiveCaseSummary[]>("/api/cases"),
+
+  /* Agentic fix for an escalated case's request text: the agent rewrites with
+     minimal edits and its output is verified deterministically on the bridge. */
+  suggestFix: (caseId: string) =>
+    call<{ text: string; changes: string[]; remaining_terms: string[]; cleared: boolean }>(
+      `/api/cases/${caseId}/suggest_fix`, { method: "POST" }),
 
   getCase: (caseId: string) => call<LiveCaseDetail>(`/api/cases/${caseId}`),
 
