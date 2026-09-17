@@ -10,13 +10,13 @@ import {
 } from "@phosphor-icons/react";
 import { useStore } from "../store";
 import { useNav } from "../nav";
-import { Chip, MicButton, MiniSource, Modal, Monogram, MultiSelect } from "../ui";
+import { BusyButton, Chip, MicButton, MiniSource, Modal, Monogram, MultiSelect } from "../ui";
 import { DocPreviewModal, PreviewLink, type PreviewTarget } from "../DocPreview";
 import { InlineDots } from "../loaders";
 import {
   CHANNEL_SLUG, LIVE_API, SEGMENT_LABEL, SEGMENT_SLUG, VERTICAL_LABEL, VERTICAL_SLUG,
   authHeaders, channelChecked, liveApi, stsMeta, stsSummary,
-  type LiveCaseDetail, type StsRecord,
+  type EscalationOption, type LiveCaseDetail, type StsRecord,
 } from "../live";
 
 const STORAGE_KEY = "shiftai.live.intake";
@@ -152,6 +152,7 @@ export default function IntakeScreen() {
   const [aspects, setAspects] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resolving, setResolving] = useState<string | null>(null);
   const [error, setError] = useState("");
   // Result of the latest directive round: which draft fields the agent actually
   // rewrote (so the change is visible in place, not implied).
@@ -397,6 +398,30 @@ export default function IntakeScreen() {
     } finally { setBusy(false); }
   }
 
+  /* One-click resolution of an escalated case: the option's field patch (plus the
+     resolver's identity, stamped into the acknowledgment) resumes the SAME case in
+     the same trace. The agent re-runs its checks; a fixed case lands back in
+     review, a still-blocked one re-escalates with a fresh explanation. */
+  async function resolveOption(option: EscalationOption) {
+    if (!caseId || busy) return;
+    setError(""); setBusy(true); setResolving(option.id);
+    const stamp = `${viewer.name} (${viewer.role}, ${viewer.email})`;
+    const patch: Record<string, string> = { ...option.patch };
+    if (option.id === "confirm_no_commitment") {
+      patch.compliance_ack =
+        `No pricing, legal, or partner commitment is made in this campaign, confirmed by ${stamp}`;
+    }
+    if (option.id === "scope_bc") patch.scope_ack = `Business Central-only scope confirmed by ${stamp}`;
+    if (option.id === "scope_fo") patch.scope_ack = `F&O-only scope confirmed by ${stamp}`;
+    try {
+      await liveApi.submitAnswers(caseId, patch, viewer.email, false);
+      const next = await loadCase(caseId);
+      setPhase(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); setResolving(null); }
+  }
+
   function startOver() {
     rememberCase(null);
     clearDraft();
@@ -454,19 +479,75 @@ export default function IntakeScreen() {
     );
   }
 
-  /* ---- escalated (duplicate / BC-F&O / compliance) ---- */
+  /* ---- escalated: never a dead end. The agent explains what it found in plain
+     language, names who decides, and offers one-click ways forward. ---- */
   if (phase === "escalated" && detail) {
+    const help = detail.summary.escalation_help;
+    const mayAct = (roles: string[]) =>
+      roles.length === 0 || roles.includes(viewer.role) || viewer.role === "AiCoE Admin";
+    const yourCall = help != null &&
+      (viewer.role === help.routed_to_role || viewer.role === "AiCoE Admin");
     return (
       <div className="screen-content intake-screen">
-        <section className="simple-page-header"><div><h1>The agent flagged this request</h1><p>It proposes and flags — a human decides. Nothing was routed.</p></div></section>
+        <section className="simple-page-header"><div><h1>The agent needs a decision</h1><p>It proposes and flags — a human decides. Nothing was routed yet.</p></div></section>
         <section className="intake-result">
-          <div className="live-gaps">
-            <p className="meta-label">Escalated · {detail.summary.escalation_reason_code}</p>
-            <p className="live-note"><WarningCircle size={14} /> Routed to a human queue for a decision. Adjust the request (topic, dates, scope) and start again, or resolve it from the Live agents screen.</p>
-          </div>
+          {help ? (
+            <div className="escalation-card">
+              <div className="escalation-head">
+                <Chip tone="amber">Needs a decision</Chip>
+                <span className="escalation-owner">
+                  {yourCall
+                    ? <>This one is yours — you&apos;re signed in as the <strong>{help.routed_to_role}</strong>.</>
+                    : <>Waiting on the <strong>{help.routed_to_role}</strong>. You can still edit the brief or start over.</>}
+                </span>
+              </div>
+              <h2>{help.title}</h2>
+              <p className="escalation-why">{help.why}</p>
+              {help.evidence.length > 0 && (
+                <div className="escalation-evidence">
+                  <small>What the agent found in your brief:</small>
+                  <span>{help.evidence.map((e) => <code key={e}>{e}</code>)}</span>
+                </div>
+              )}
+              <p className="escalation-policy"><WarningCircle size={13} /> {help.policy}</p>
+              <div className="escalation-options">
+                {help.options.map((o) => {
+                  const allowed = mayAct(o.roles);
+                  const action = o.kind === "resolve"
+                    ? (
+                      <BusyButton busy={resolving === o.id} busyLabel="The agent is re-checking…"
+                        disabled={busy || !allowed} onClick={() => void resolveOption(o)}>
+                        {o.label}
+                      </BusyButton>
+                    )
+                    : (
+                      <button className="secondary-button" disabled={busy}
+                        onClick={o.kind === "edit" ? () => setPhase("review") : startOver}>
+                        {o.label}
+                      </button>
+                    );
+                  const note = !allowed && o.kind === "resolve"
+                    ? `Only the ${o.roles.join(" or ")} can take this action.`
+                    : o.note;
+                  return (
+                    <div className="escalation-option" key={o.id}>
+                      {action}
+                      {note && <small>{note}</small>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="live-gaps">
+              <p className="meta-label">Escalated · {detail.summary.escalation_reason_code}</p>
+              <p className="live-note"><WarningCircle size={14} /> This case needs a human decision. Edit the request and resubmit, or start a new one.</p>
+            </div>
+          )}
+          {error && <p className="live-note"><WarningCircle size={14} /> {error}</p>}
           {feed}
           <div className="intake-result-actions">
-            <button className="primary-button" onClick={startOver}>Start a new request</button>
+            <button className="secondary-button" onClick={startOver}>Start a new request</button>
             <button className="secondary-button" onClick={() => go("live")}>Open Live agents</button>
           </div>
         </section>

@@ -57,10 +57,25 @@ export type LiveRequestFields = {
   derived_fields: Record<string, string>;
 };
 
+/* One resolution the agent offers on an escalated case. "resolve" patches
+   fields and resumes the same case in one click; "edit" reopens the form;
+   "restart" begins a new request. roles empty = anyone may act. */
+export type EscalationOption = {
+  id: string; label: string; kind: "resolve" | "edit" | "restart";
+  patch: Record<string, string>; roles: string[]; note: string | null;
+};
+
+export type EscalationHelp = {
+  reason_code: string; routed_to: string; routed_to_role: string;
+  title: string; why: string; policy: string;
+  evidence: string[]; options: EscalationOption[];
+};
+
 export type LiveCaseSummary = {
   case_id: string; status: string; action_class: string | null; campaign_id: string | null;
   topic: string | null; business_unit: string | null; vertical: string | null;
   gap_rounds: number; escalation_reason_code: string | null; doc_ref: string | null;
+  escalation_help: EscalationHelp | null;
   trace_id: string | null; brief_version: number | null; returned_note: string | null;
   last_directive: { note: string; aspects: string[]; by: string } | null;
   derived_fields: Record<string, string>;

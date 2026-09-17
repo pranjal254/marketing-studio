@@ -47,8 +47,7 @@ export default function LoginScreen() {
           <SignIn size={16} /> Sign in
         </button>
         <p className="login-note">
-          Accounts are created by AiCoE (aicoe@levelshift.com) with a shared default
-          password. Single sign-on replaces this in production.
+          Accounts are created by AI CoE team. Single sign-on replaces this in production.
         </p>
       </form>
     </main>

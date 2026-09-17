@@ -1558,3 +1558,30 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 .asset-flash { animation: asset-flash-kf 1.6s ease-out; border-color: var(--accent, #0f62fe) !important; }
 @media (prefers-reduced-motion: reduce) { .asset-flash { animation: none; } }
+
+/* Escalation decision panel: the agent explains what it found in plain words,
+   names the decider, and offers one-click resolutions. Mobile-first. */
+.escalation-card {
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid rgba(245,158,11,0.35); border-radius: var(--r-control);
+  background: rgba(245,158,11,0.05); padding: 14px;
+}
+.escalation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.escalation-owner { font-size: 12.5px; color: var(--text-dim, #475467); }
+.escalation-card h2 { margin: 0; font-size: 16.5px; line-height: 1.35; letter-spacing: -0.01em; }
+.escalation-why { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-dim, #475467); }
+.escalation-evidence { display: flex; flex-direction: column; gap: 5px; }
+.escalation-evidence small { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim, #475467); }
+.escalation-evidence span { display: flex; flex-wrap: wrap; gap: 6px; }
+.escalation-evidence code {
+  font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(245,158,11,0.14); border: 1px solid rgba(245,158,11,0.3); color: #92400e;
+}
+.escalation-policy {
+  display: flex; align-items: flex-start; gap: 6px; margin: 0;
+  font-size: 12px; line-height: 1.5; font-style: italic; color: var(--text-dim, #475467);
+}
+.escalation-policy svg { flex-shrink: 0; margin-top: 2px; }
+.escalation-options { display: flex; flex-direction: column; gap: 10px; margin-top: 2px; }
+.escalation-option { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.escalation-option small { font-size: 11.5px; color: var(--text-dim, #475467); }
