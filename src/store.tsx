@@ -92,6 +92,10 @@ export type MirrorLiveBrief = {
   vertical: string; segment: string; channels: string[];
   window: { start: string; end: string }; budgetApproved: boolean;
   request: string; briefVersion: string;
+  // Adopting a case already approved on the bridge (e.g. opened in a browser
+  // that never saw the flow): mirror it in its real journey state — planning,
+  // no stale approval task. The reconciliation loop then syncs the box state.
+  approved?: boolean;
 };
 
 /* The REAL Campaign-in-a-Box plan mirrored into the studio journey: status,
@@ -394,12 +398,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         campaignType: "Demand generation", objective: input.objective, topic: input.topic,
         segment: input.segment, channels: input.channels, window: input.window,
         requesterId: state.viewAsId, ownerId: state.viewAsId,
-        budgetApproved: input.budgetApproved, state: "brief_pending_approval", step: 1,
+        budgetApproved: input.budgetApproved,
+        state: input.approved ? "planning" : "brief_pending_approval",
+        step: input.approved ? 2 : 1,
         request: input.request, briefVersion: input.briefVersion, liveCaseId: input.caseId,
+        ...(input.approved ? { liveCampaignId: input.caseId } : {}),
       };
       if (existing) dispatch({ type: "CAMPAIGN_PATCH", id: input.caseId, patch: { ...campaign } });
       else dispatch({ type: "CAMPAIGN_ADD", campaign });
       emit({ ts: Date.now(), trace, agent: "CI", campaignId: input.caseId, activity: "draft_brief", summary: `Brief ${input.briefVersion} drafted by the live Campaign Identification agent (see Live agents for the full STS trace)`, cost: 0, sources: ["Live agent case " + input.caseId] });
+      if (input.approved) {
+        emit({ ts: Date.now(), trace, agent: "CI", campaignId: input.caseId, activity: "brief_approved", summary: `Brief ${input.briefVersion} approved by the ${lead.role} — campaign adopted from the workspace database`, cost: 0, sources: ["Live agent case " + input.caseId] });
+        return;
+      }
       emit({ ts: Date.now(), trace, agent: "CI", campaignId: input.caseId, activity: "route_brief_approval", summary: `Brief approval routed to ${lead.name}, due in 2 business days`, cost: 0, sources: ["Live agent case " + input.caseId] });
       const hasOpenTask = state.tasks.some(
         (t) => t.campaignId === input.caseId && t.kind === "brief_approval" && t.status === "open",

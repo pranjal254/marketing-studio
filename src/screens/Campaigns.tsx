@@ -137,7 +137,8 @@ function AdoptLiveCampaign({ caseId }: { caseId: string }) {
         const labels = (raw: string | null | undefined, map: Record<string, string>) =>
           (raw ?? "").split(",").map((t) => t.trim()).filter(Boolean)
             .map((s) => map[s] ?? s).join(", ");
-        if (d.summary.status === "awaiting_approval" || d.summary.status === "draft_review") {
+        const adoptable = ["awaiting_approval", "draft_review", "approved"];
+        if (adoptable.includes(d.summary.status)) {
           actions.mirrorLiveBrief({
             caseId,
             name: r?.offer_topic || "New campaign",
@@ -151,6 +152,7 @@ function AdoptLiveCampaign({ caseId }: { caseId: string }) {
             budgetApproved: r?.budget_flag === true,
             request: r?.free_text_context ?? "",
             briefVersion: `v${d.summary.brief_version ?? 1}`,
+            approved: d.summary.status === "approved",
           });
           // the store update re-renders the parent, which now finds the campaign
         } else {
