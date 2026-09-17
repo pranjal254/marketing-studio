@@ -504,7 +504,7 @@ export default function IntakeScreen() {
     try {
       const outcome = await liveApi.submitAnswers(caseId, answersFromForm(form), viewer.email, true);
       await refreshEvents(outcome.trace_id);
-      if (outcome.status === "awaiting_approval" && outcome.brief) {
+      if (outcome.status === "awaiting_approval") {
         actions.mirrorLiveBrief({
           caseId,
           name: form.topic || "New campaign",
@@ -517,7 +517,7 @@ export default function IntakeScreen() {
           window: { start: form.start, end: form.end },
           budgetApproved: form.budget === "Yes",
           request: description || (detail?.summary.request?.free_text_context ?? ""),
-          briefVersion: `v${outcome.brief.version}`,
+          briefVersion: `v${outcome.brief?.version ?? 1}`,
         });
         clearDraft();
         await loadCase(caseId);

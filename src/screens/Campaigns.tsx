@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUpRight, CaretRight, Check, Clock, FileText, Plus } from "@phosphor-icons/react";
 import { assigneeName, assigneeShort, campaignCost, effectiveWriters, openTasksFor, personById, useStore } from "../store";
 import { canAccess } from "../access";
@@ -15,24 +15,7 @@ export default function CampaignsScreen() {
   const { nav, go } = useNav();
   const selected = nav.campaignId ? state.campaigns.find((c) => c.id === nav.campaignId) : undefined;
   if (selected) return <CampaignDetail campaign={selected} />;
-  if (nav.campaignId) {
-    // A deep link to a campaign this browser hasn't mirrored (or one removed
-    // when the workspace data was reset) — say so instead of a bare list.
-    return (
-      <div className="screen-content campaigns-screen">
-        <section className="simple-page-header">
-          <div><h1>Campaign not found</h1>
-            <p>This campaign isn&apos;t in your workspace view — it may have been removed
-              when the workspace data was reset, or it was created in another browser.
-              Approvals still reach the right people either way.</p></div>
-        </section>
-        <div className="intake-result-actions">
-          <button className="primary-button" onClick={() => go("campaigns")}>All campaigns</button>
-          <button className="secondary-button" onClick={() => go("approvals")}>Open Approvals</button>
-        </div>
-      </div>
-    );
-  }
+  if (nav.campaignId) return <AdoptLiveCampaign caseId={nav.campaignId} />;
 
   const ordered = [...state.campaigns].sort((a, b) => (a.state === "approved_locked" ? 1 : 0) - (b.state === "approved_locked" ? 1 : 0) || b.step - a.step);
   const canRequest = canAccess(viewer.role, "intake");
@@ -134,6 +117,72 @@ function WriterStaffing({ campaign }: { campaign: Campaign }) {
         </Menu>
       )}
     </section>
+  );
+}
+
+/* A campaign URL this browser hasn't mirrored: the workspace DB is the source
+   of truth, so ask the bridge for the case and ADOPT it into the local view
+   (self-healing — the page only says "not found" when the bridge does too). */
+function AdoptLiveCampaign({ caseId }: { caseId: string }) {
+  const { actions } = useStore();
+  const { go } = useNav();
+  const [status, setStatus] = useState<"checking" | "missing">("checking");
+  const tried = useRef(false);
+  useEffect(() => {
+    if (tried.current) return;
+    tried.current = true;
+    void import("../live").then(({ liveApi, VERTICAL_LABEL, SEGMENT_LABEL }) =>
+      liveApi.getCase(caseId).then((d) => {
+        const r = d.summary.request;
+        const labels = (raw: string | null | undefined, map: Record<string, string>) =>
+          (raw ?? "").split(",").map((t) => t.trim()).filter(Boolean)
+            .map((s) => map[s] ?? s).join(", ");
+        if (d.summary.status === "awaiting_approval" || d.summary.status === "draft_review") {
+          actions.mirrorLiveBrief({
+            caseId,
+            name: r?.offer_topic || "New campaign",
+            objective: r?.objective ?? "",
+            topic: r?.offer_topic ?? "",
+            bu: r?.business_unit ?? "",
+            vertical: labels(r?.vertical, VERTICAL_LABEL),
+            segment: labels(r?.target_segment, SEGMENT_LABEL),
+            channels: r?.channels ?? [],
+            window: { start: r?.timeline_start ?? "", end: r?.timeline_end ?? "" },
+            budgetApproved: r?.budget_flag === true,
+            request: r?.free_text_context ?? "",
+            briefVersion: `v${d.summary.brief_version ?? 1}`,
+          });
+          // the store update re-renders the parent, which now finds the campaign
+        } else {
+          setStatus("missing");
+        }
+      }).catch(() => setStatus("missing")),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one lookup per mount
+  }, [caseId]);
+  if (status === "checking") {
+    return (
+      <div className="screen-content campaigns-screen">
+        <section className="simple-page-header">
+          <div><h1>Finding this campaign…</h1>
+            <p>Your browser hasn&apos;t seen it yet — checking the workspace database.</p></div>
+        </section>
+      </div>
+    );
+  }
+  return (
+    <div className="screen-content campaigns-screen">
+      <section className="simple-page-header">
+        <div><h1>Campaign not found</h1>
+          <p>This campaign isn&apos;t in the workspace database — it may have been removed
+            when the workspace data was reset, or the link is stale. Approvals still
+            reach the right people either way.</p></div>
+      </section>
+      <div className="intake-result-actions">
+        <button className="primary-button" onClick={() => go("campaigns")}>All campaigns</button>
+        <button className="secondary-button" onClick={() => go("approvals")}>Open Approvals</button>
+      </div>
+    </div>
   );
 }
 
