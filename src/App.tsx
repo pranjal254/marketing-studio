@@ -1,7 +1,7 @@
 import { Suspense, lazy, useContext, useEffect, useMemo, useRef, useState, useTransition, type ComponentType } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import {
-  ArrowClockwise, Bell, BellSlash, Broadcast, CaretDown, ChartLineUp, Checks, CurrencyDollar,
+  Bell, BellSlash, Broadcast, CaretDown, ChartLineUp, Checks, CurrencyDollar,
   FlowArrow, HourglassMedium, House, ListChecks, MagnifyingGlass, Package, Question, Robot,
   SealCheck, SidebarSimple, SignOut, SquaresFour, UsersThree, Warning, type Icon,
 } from "@phosphor-icons/react";
@@ -373,8 +373,6 @@ function Shell() {
                     <button key={p.id} onClick={() => actions.setViewAs(p.id)} disabled={p.id === viewer.id}>{p.name} · {p.role}{p.id === viewer.id ? " (current)" : ""}</button>
                   ))}
                   <div className="menu-sep" />
-                  <button onClick={() => actions.reset()}><ArrowClockwise size={14} /> Reset demo data</button>
-                  <div className="menu-sep" />
                 </>
               )}
               <button onClick={() => logout()}><SignOut size={14} /> Sign out{authed ? ` (${authed.name.split(" ")[0]})` : ""}</button>
@@ -422,7 +420,7 @@ function Shell() {
           <p><strong>One pipeline, real state.</strong> Every number is computed from the telemetry event log (STS v1.1) and every action you take advances the same shared state: submit a request, answer the agent's gap questions, resolve conflicts, approve, sign off.</p>
           <p><strong>Explainability.</strong> Click any activity line, journey-step trace, or KPI to see exactly where a number or decision came from: actor, model, tokens, cost, timing and the state transition with its reason.</p>
           <p><strong>Personas.</strong> You act as one person at a time. Use the profile menu to view the workspace as Marcus (brief approvals, sign-offs), Jen (content reviews), Tom (Grammar QA) or Sofia, and complete the pipeline end to end.</p>
-          <p className="explain-note">State persists in this browser. "Reset demo data" in the profile menu returns everything to the starting point.</p>
+          <p className="explain-note">State persists in this browser, and live campaigns are restored from the workspace database.</p>
         </Modal>
       )}
     </main>

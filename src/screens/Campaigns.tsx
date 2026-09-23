@@ -153,6 +153,7 @@ function AdoptLiveCampaign({ caseId }: { caseId: string }) {
             request: r?.free_text_context ?? "",
             briefVersion: `v${d.summary.brief_version ?? 1}`,
             approved: d.summary.status === "approved",
+            liveCampaignId: d.summary.campaign_id,
           });
           // the store update re-renders the parent, which now finds the campaign
         } else {

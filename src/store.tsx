@@ -17,7 +17,6 @@ export function uid(prefix: string): string {
 }
 
 type Action =
-  | { type: "RESET" }
   | { type: "EVENT"; event: TelemetryEvent }
   | { type: "CAMPAIGN_ADD"; campaign: Campaign }
   | { type: "CAMPAIGN_PATCH"; id: string; patch: Partial<Campaign> }
@@ -37,7 +36,6 @@ type Action =
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "RESET": return buildSeed();
     case "EVENT": return { ...state, events: [...state.events, action.event] };
     case "CAMPAIGN_ADD": return { ...state, campaigns: [...state.campaigns, action.campaign] };
     case "CAMPAIGN_PATCH": return { ...state, campaigns: state.campaigns.map((c) => c.id === action.id ? { ...c, ...action.patch } : c) };
@@ -96,6 +94,10 @@ export type MirrorLiveBrief = {
   // that never saw the flow): mirror it in its real journey state — planning,
   // no stale approval task. The reconciliation loop then syncs the box state.
   approved?: boolean;
+  // The agent-side cmp_… id carried on the case record. The box and gate
+  // endpoints key on it, so without it the reconciliation loop 404s and the
+  // journey position can never be restored.
+  liveCampaignId?: string | null;
 };
 
 /* The REAL Campaign-in-a-Box plan mirrored into the studio journey: status,
@@ -223,7 +225,6 @@ type Store = {
   traceId: string | null;
   openTrace: (traceId: string | null) => void;
   actions: {
-    reset: () => void;
     setViewAs: (id: string) => void;
     markAllRead: () => void;
     submitRequest: (form: IntakeForm) => string;
@@ -361,7 +362,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     : viewAsPerson ?? state.people[0];
 
   const actions: Store["actions"] = {
-    reset: () => { dispatch({ type: "RESET" }); showToast("Demo data reset to the starting point"); },
     setViewAs: (id) => { dispatch({ type: "VIEWAS", id }); },
     markAllRead: () => dispatch({ type: "NOTIFS_READ", personId: state.viewAsId }),
 
@@ -403,7 +403,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         state: input.approved ? "planning" : "brief_pending_approval",
         step: input.approved ? 2 : 1,
         request: input.request, briefVersion: input.briefVersion, liveCaseId: input.caseId,
-        ...(input.approved ? { liveCampaignId: input.caseId } : {}),
+        ...(input.approved && input.liveCampaignId
+          ? { liveCampaignId: input.liveCampaignId }
+          : {}),
       };
       if (existing) dispatch({ type: "CAMPAIGN_PATCH", id: input.caseId, patch: { ...campaign } });
       else dispatch({ type: "CAMPAIGN_ADD", campaign });
@@ -779,8 +781,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     /* Mirror the live Quality Gate's review tasks into the studio queue: open
        gate tasks become shared, role-gated queue items (Grammar / Quality
        Reviewer for asset reviews, BU Campaign Lead for the package sign-off);
-       decided/cancelled gate tasks close their mirrors. Idempotent — mirror ids
-       are derived from the gate task id. */
+       decided/cancelled gate tasks close their mirrors, and the journey position
+       follows the gate. Idempotent — mirror ids are derived from the gate task
+       id and the position is recomputed from the full task set. */
     syncGateTasks: (campaignId, gateTasks) => {
       const campaign = state.campaigns.find((c) => c.id === campaignId);
       if (!campaign?.liveCampaignId) return;
@@ -822,6 +825,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             },
           });
         }
+      }
+
+      /* The live gate owns the last two journey steps: asset language reviews
+         are step 08, an open package sign-off is step 09, and an approved one
+         locks the campaign. A returned package re-opens packaging at step 07. */
+      const pkg = gateTasks.filter((t) => t.scope === "package");
+      const pkgApproved = pkg.some((t) => t.status === "approved");
+      const pkgOpen = pkg.some((t) => t.status === "open");
+      const pkgReturned = pkg.some((t) => t.status === "returned");
+      const assetReview = gateTasks.some((t) => t.scope === "asset" && t.status !== "cancelled");
+      const target: { state: Campaign["state"]; step: number } | null =
+        pkgApproved ? { state: "approved_locked", step: 9 }
+        : pkgOpen ? { state: "awaiting_signoff", step: 9 }
+        : pkgReturned ? { state: "packaged_pending_compliance", step: 7 }
+        : assetReview ? { state: "packaged_pending_compliance", step: 8 }
+        : null;
+      if (target && (campaign.state !== target.state || campaign.step !== target.step)) {
+        dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch: target });
       }
     },
 
@@ -1005,10 +1026,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void liveApi.listCases()
       .then((cases) => {
         // Prune: a mirrored live campaign the DB no longer knows is removed.
+        // Match on the case id — liveCampaignId is the agent-side cmp_… id and
+        // never appears in the case list, so keying on it prunes every approved
+        // campaign on boot.
         const known = new Set(cases.map((c) => c.case_id));
         for (const c of state.campaigns) {
-          const liveId = c.liveCampaignId ?? (c.id.startsWith("case_") ? c.id : null);
-          if (liveId && !known.has(liveId)) {
+          const caseId = c.liveCaseId ?? (c.id.startsWith("case_") ? c.id : null);
+          if (caseId && !known.has(caseId)) {
             dispatch({ type: "CAMPAIGN_REMOVE", id: c.id });
           }
         }
@@ -1017,12 +1041,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // task, approved ones in planning state (the reconciliation loop then
         // syncs their live box state). Escalated/draft cases are not campaigns
         // yet; they live on the intake and Live agents screens.
-        const mirrored = new Set(state.campaigns.map((c) => c.id));
+        const mirrored = new Map(state.campaigns.map((c) => [c.id, c]));
         const labels = (raw: string | null | undefined, map: Record<string, string>) =>
           (raw ?? "").split(",").map((t) => t.trim()).filter(Boolean)
             .map((slug) => map[slug] ?? slug).join(", ");
         for (const c of cases) {
-          if (mirrored.has(c.case_id)) continue;
+          const alreadyMirrored = mirrored.get(c.case_id);
+          if (alreadyMirrored) {
+            // Repair a cached campaign adopted by an older build, which stored
+            // the case id here. Box and gate endpoints key on cmp_…, so until
+            // this is corrected every reconciliation call 404s.
+            if (c.campaign_id && alreadyMirrored.liveCampaignId !== c.campaign_id) {
+              dispatch({
+                type: "CAMPAIGN_PATCH", id: c.case_id,
+                patch: { liveCampaignId: c.campaign_id },
+              });
+            }
+            continue;
+          }
           if (c.status !== "awaiting_approval" && c.status !== "approved") continue;
           const r = c.request;
           actions.mirrorLiveBrief({
@@ -1039,6 +1075,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             request: r?.free_text_context ?? "",
             briefVersion: `v${c.brief_version ?? 1}`,
             approved: c.status === "approved",
+            liveCampaignId: c.campaign_id,
           });
         }
       })
