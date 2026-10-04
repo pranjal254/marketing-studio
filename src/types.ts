@@ -1,6 +1,6 @@
 export type PageKey =
   | "home" | "rollout" | "campaigns" | "agents" | "approvals"
-  | "library" | "insights" | "users" | "intake" | "activity" | "live";
+  | "library" | "insights" | "users" | "intake" | "activity" | "live" | "ask";
 
 export type Role =
   | "Marketing Lead" | "BU Campaign Lead" | "Content Writer"

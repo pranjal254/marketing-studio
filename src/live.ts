@@ -163,6 +163,41 @@ export type RepurposeSelfCheck = {
   passed: boolean; attempts: number;
   findings: { rule_id: string; severity: string; term: string; detail: string }[];
   unsourced_numeric_tokens: string[]; missing_brand_mention: boolean;
+  /* Length vs the campaign's content settings. word_range is null when no
+     range applied to this draft (older drafts, or an asset with no setting). */
+  word_count?: number | null;
+  word_range?: [number, number] | null;
+  word_count_in_range?: boolean;
+};
+
+/* ---------- per-campaign content settings (counts + word limits) ---------- */
+
+export type AssetContentSetting = {
+  asset_id: string; asset_type: string; label: string;
+  variants: number; min_words: number; max_words: number;
+};
+
+export type ContentSettings = {
+  campaign_id: string; version: number; items: AssetContentSetting[];
+  set_by: string | null; set_by_role: string | null; set_at: string;
+  note: string | null;
+  /* Anything the agent clamped, in words, so the writer sees the correction
+     rather than wondering why they got five of something instead of twelve. */
+  adjustments: string[];
+};
+
+/* The bridge sends the bounds with the settings so the studio constrains its
+   inputs to exactly what the agent will accept — one source of truth. */
+export type ContentSettingsView = {
+  campaign_id: string;
+  saved: boolean;
+  settings: ContentSettings;
+  limits: { max_variants_per_asset: number; word_floor: number; word_ceiling: number };
+  config_version: string;
+};
+
+export type ContentSettingRequest = {
+  asset_id: string; variants?: number; min_words?: number; max_words?: number;
 };
 
 export type RepurposeGapNote = { gap_id: string; asset_id: string; section: string; needed: string };
@@ -190,6 +225,86 @@ export type RepurposeDetail = {
   } | null;
   gap_notes: RepurposeGapNote[];
   model: string;
+};
+
+/* ---------- Ask anything (Beta assistant) ---------- */
+
+export type AskReference = {
+  kind: "campaign" | "task" | "asset" | "document" | "screen";
+  id: string;
+  label: string;
+};
+
+/* One read-only lookup the assistant made while answering. Shown so a person
+   can see what the answer was actually based on. */
+export type AskToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  error: string | null;
+  duration_ms: number;
+};
+
+export type AskAnswer = {
+  answer: string;
+  references: AskReference[];
+  suggested_screen: string | null;
+  confidence: number;
+  /* False when the answer cites nothing. The UI says so rather than passing an
+     ungrounded answer off as fact. */
+  grounded: boolean;
+  tool_calls: AskToolCall[];
+  steps: number;
+  beta: boolean;
+  model: string;
+  trace_id: string;
+  duration_ms: number;
+  cost_usd: number | null;
+  conversation_id: string;
+  title: string;
+};
+
+export type AskTurn = {
+  role: "you" | "assistant";
+  text: string;
+  at: string;
+  references: AskReference[];
+  tool_calls: AskToolCall[];
+  suggested_screen: string | null;
+  grounded: boolean;
+  cost_usd: number | null;
+  model: string | null;
+};
+
+export type AskConversation = {
+  conversation_id: string;
+  actor_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  turns: AskTurn[];
+};
+
+/* List-row shape: enough to pick a conversation, without its body. */
+export type AskConversationSummary = {
+  conversation_id: string;
+  actor_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  turns: number;
+  last_message: string;
+};
+
+export type AskMeta = {
+  agent_id: string; version: string; model: string; beta: boolean;
+  capabilities: {
+    question_answering: boolean; tool_calling: boolean;
+    conversation_history: boolean; actions: boolean;
+  };
+  max_steps: number;
+  tools: { name: string; args: string; description: string }[];
+  process: string;
 };
 
 /* ---------- Agent 4 (Collaboration & Iteration) payload types ---------- */
@@ -492,6 +607,54 @@ export const liveApi = {
       method: "POST",
       body: JSON.stringify({ asset_id: assetId, instruction, actor_id: actorId }),
     }),
+
+  /* Content settings: how many of each asset and how long. Served with the
+     config defaults until the writer saves, so there is always something to
+     show. The PUT is a patch — assets left out keep their current values. */
+  boxContentSettings: (campaignId: string) =>
+    call<ContentSettingsView>(`/api/box/campaigns/${campaignId}/content-settings`),
+
+  boxSaveContentSettings: (
+    campaignId: string,
+    items: ContentSettingRequest[],
+    actorId: string,
+    actorRole: string,
+    note?: string,
+  ) =>
+    call<ContentSettingsView>(`/api/box/campaigns/${campaignId}/content-settings`, {
+      method: "PUT",
+      body: JSON.stringify({ actor_id: actorId, actor_role: actorRole, note, items }),
+    }),
+
+  /* ---------- Ask anything (Beta, read-only) ----------
+     The assistant looks things up through its own read-only tools on the
+     bridge; the studio sends only the question and who is asking. Passing a
+     conversation_id continues that thread, so a follow-up resolves against
+     what was already said. */
+
+  askMeta: () => call<AskMeta>("/api/ask/meta"),
+
+  ask: (
+    question: string,
+    viewer: unknown,
+    actorId: string,
+    conversationId?: string | null,
+  ) =>
+    call<AskAnswer>("/api/ask", {
+      method: "POST",
+      body: JSON.stringify({
+        question, viewer, actor_id: actorId,
+        conversation_id: conversationId ?? null,
+      }),
+    }),
+
+  askConversations: (actorId: string) =>
+    call<{ conversations: AskConversationSummary[] }>(
+      `/api/ask/conversations?actor_id=${encodeURIComponent(actorId)}`,
+    ),
+
+  askConversation: (conversationId: string) =>
+    call<AskConversation>(`/api/ask/conversations/${encodeURIComponent(conversationId)}`),
 
   /* Draft/claim-map download by workspace-relative path (from RepurposeDraft.file_rel). */
   boxDraftUrl: (rel: string | null | undefined): string | null =>

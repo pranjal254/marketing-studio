@@ -21,23 +21,25 @@ export const DEFAULT_PASSWORD = "levelshift2@26";
                            Marketing Lead minus intake (they don't request)
    - Content Writer ...... their work only: home, campaigns, their approvals
    - Grammar / Quality ... same as writers: home, campaigns, their approvals
-   - Viewer .............. read-only: home, campaigns, package library */
+   - Viewer .............. read-only: home, campaigns, package library
+   Ask anything is on every list: it is read-only and answers only from the
+   state the viewer already has, so it adds no reach that the role lacks. */
 const ROLE_PAGES: Record<Role, PageKey[]> = {
   "AiCoE Admin": [
     "home", "intake", "campaigns", "agents", "approvals", "library",
-    "insights", "activity", "live", "rollout", "users",
+    "insights", "activity", "live", "rollout", "users", "ask",
   ],
   "Marketing Lead": [
     "home", "intake", "campaigns", "agents", "approvals", "library",
-    "insights", "activity", "rollout",
+    "insights", "activity", "rollout", "ask",
   ],
   "BU Campaign Lead": [
     "home", "campaigns", "agents", "approvals", "library", "insights",
-    "activity", "rollout",
+    "activity", "rollout", "ask",
   ],
-  "Content Writer": ["home", "campaigns", "approvals"],
-  "Grammar / Quality Reviewer": ["home", "campaigns", "approvals"],
-  "Viewer": ["home", "campaigns", "library"],
+  "Content Writer": ["home", "campaigns", "approvals", "ask"],
+  "Grammar / Quality Reviewer": ["home", "campaigns", "approvals", "ask"],
+  "Viewer": ["home", "campaigns", "library", "ask"],
 };
 
 export function canAccess(role: Role, page: PageKey): boolean {

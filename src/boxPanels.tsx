@@ -15,6 +15,7 @@ import {
 } from "./live";
 import { openTasksFor, useStore } from "./store";
 import { BusyButton, Chip, Monogram } from "./ui";
+import { ContentSettingsPanel } from "./contentSettings";
 import { DocPreviewModal, PreviewLink, type PreviewTarget } from "./DocPreview";
 import type { Campaign, Task } from "./types";
 
@@ -705,6 +706,18 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
           )}
           {drafting && (
             <p className="live-note">The agent is generating — this panel refreshes automatically.</p>
+          )}
+          {/* Counts and lengths, set between the flagship confirmation and the
+              fan-out. Hidden before the flagship exists (there is no plan to
+              tune yet) and read-only once the derivatives are staged. */}
+          {rpStatus !== null && (
+            <ContentSettingsPanel
+              boxId={boxId}
+              actorId={viewer.email}
+              canEdit={canProduce}
+              locked={rpStatus === "derivatives_staged"}
+              onSaved={() => showToast("Content settings saved for this campaign")}
+            />
           )}
           {(() => {
             // Gap notes for assets without their own card below (a card lists its

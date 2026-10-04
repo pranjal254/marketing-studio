@@ -99,15 +99,7 @@ code { font-family: var(--font-mono); }
 
 /* Topbar */
 .topbar { position: sticky; top: 0; z-index: 15; height: 54px; padding: 10px 22px; background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 16px; }
-.ask-wrap { width: min(560px, 50vw); position: relative; }
-.ask-bar { width: 100%; height: 34px; border: 1px solid #dededf; border-radius: var(--r-control); background: var(--surface); color: var(--muted); display: flex; align-items: center; gap: 10px; padding: 0 8px 0 11px; text-align: left; font-size: 12.5px; }
-.ask-bar:hover { border-color: #c6c6cc; background: #fff; }
-.ask-bar > span { flex: 1; }
-.ask-bar kbd { border: 1px solid var(--line); background: #fff; color: #8a8a92; border-radius: 6px; padding: 2px 7px; font-size: 11px; font-family: var(--font-mono); }
-.ask-popover { position: absolute; top: 48px; left: 0; width: 100%; padding: 18px; border: 1px solid var(--line); background: #fff; border-radius: var(--r-panel); box-shadow: 0 12px 32px rgba(23, 23, 28, 0.1); }
-.ask-popover strong { display: block; font-size: 14px; margin: 6px 0; color: var(--ink); }
-.ask-popover > p:not(.meta-label) { margin-bottom: 0; font-size: 13px; color: var(--muted); }
-.ask-sources { display: flex; gap: 6px; margin-top: 12px; }
+.topbar-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
 .top-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .top-actions > button, .bell-wrap > button.notification { width: 32px; height: 32px; border: 0; border-radius: var(--r-control); background: transparent; color: #5c5c64; position: relative; display: grid; place-items: center; transition: background 0.13s ease, color 0.13s ease; }
 .top-actions > button:hover, .bell-wrap > button.notification:hover { background: var(--faint); color: var(--ink); }
@@ -711,7 +703,6 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .sidebar nav button em { margin-left: 6px; }
   .main-panel { margin-left: 0; }
   .topbar { padding: 10px 14px; gap: 10px; }
-  .ask-wrap { flex: 1; width: auto; }
   .role-chip { display: none; }
   .notif-panel { width: min(340px, calc(100vw - 24px)); }
   .journey-detail { grid-template-columns: 1fr; gap: 16px; }
@@ -826,15 +817,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .menu-sep { height: 1px; background: var(--line); margin: 4px 0; }
 .profile-menu > summary.profile { display: flex; }
 
-/* Ask bar + notifications */
-.ask-bar.as-input input { flex: 1; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--ink); outline: none; min-width: 0; }
-.ask-bar.as-input input::placeholder { color: var(--muted); }
-.ask-result { width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; }
-.ask-result:hover { background: var(--faint); }
-.ask-result strong { display: block; font-size: 13px; color: var(--ink); font-weight: 550; }
-.ask-result small { display: block; margin-top: 1px; color: var(--muted); font-size: 11.5px; }
-.ask-empty { margin: 2px 10px 8px; color: var(--muted); font-size: 12.5px; }
-.ask-popover .meta-label { margin: 6px 10px 2px; }
+/* Notifications */
+.ask-empty { margin: 2px 0 8px; color: var(--muted); font-size: 12px; }
 .bell-wrap { position: relative; }
 .bell-wrap > button.notification.open { background: var(--brand-soft); color: var(--brand-ink); }
 .bell-wrap > button.notification.has-unread { color: var(--brand); }
@@ -1121,19 +1105,10 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .doc-toolbar-actions > button.iterate-link { color: var(--amber-ink); }
 .doc-toolbar-actions > button.iterate-link:hover { color: #6b3a05; }
 
-/* ===== Ask/act bar: suggestions and answer cards ===== */
-.ask-suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 10px; }
+/* ===== Ask anything: suggestion chips (shared with the panel) ===== */
+.ask-suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 0; }
 .ask-suggest button { height: 26px; padding: 0 11px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); color: #55555c; font-size: 11.5px; font-weight: 550; }
 .ask-suggest button:hover { border-color: var(--brand-line); color: var(--brand-ink); background: #fff; }
-.ask-answer { margin: 4px 4px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 4px; }
-.ask-answer-head { display: flex; align-items: center; gap: 7px; padding: 7px 8px 6px; color: var(--brand-ink); }
-.ask-answer-head strong { font-size: 12.5px; color: var(--ink); }
-.ask-answer-head small { margin-left: auto; color: var(--muted); font-size: 11px; }
-.ask-answer-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; background: transparent; text-align: left; padding: 7px 8px; border-radius: 7px; }
-.ask-answer-row:hover { background: #fff; }
-.ask-answer-row strong { display: block; font-size: 12.5px; color: var(--ink); font-weight: 550; }
-.ask-answer-row small { display: block; margin-top: 1px; color: var(--muted); font-size: 11px; }
-.ask-answer-row em { font-style: normal; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); flex-shrink: 0; }
 
 /* ===== Context panel: dockable, structured, cited ===== */
 .flip-x { transform: scaleX(-1); }
@@ -1631,3 +1606,111 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .danger-button { color: #b42318; border-color: rgba(217,45,32,0.35); }
 .danger-button:hover { background: rgba(217,45,32,0.06); border-color: rgba(217,45,32,0.5); }
 .live-note-plain { margin: 0 0 12px; font-size: 13px; line-height: 1.55; color: var(--text-dim, #475467); }
+
+/* ---------- Content settings (counts + word limits per campaign) ---------- */
+.cs-panel { border: 1px solid var(--line-soft); border-radius: var(--r-control); background: #fff; }
+.cs-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 0; background: transparent; text-align: left; color: var(--muted); border-radius: var(--r-control); }
+.cs-head:hover { background: var(--faint); }
+.cs-head > span { flex: 1; min-width: 0; }
+.cs-head strong { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.cs-head small { display: block; margin-top: 1px; font-size: 11.5px; color: var(--muted); }
+.cs-head em { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--brand-ink); }
+.cs-intro { margin: 0; padding: 0 12px 10px; font-size: 12px; color: var(--muted); line-height: 1.55; }
+.cs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cs-table th, .cs-table td { padding: 7px 12px; border-top: 1px solid var(--line-soft); text-align: left; }
+.cs-table thead th { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); border-top: 0; }
+.cs-table tbody th { font-weight: 550; color: var(--ink); }
+.cs-table tbody th small { display: block; margin-top: 1px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.cs-table thead th:not(:first-child), .cs-table td { width: 104px; }
+.cs-num { width: 76px; height: 28px; padding: 0 8px; border: 1px solid #d9d9de; border-radius: 6px; background: #fff; color: var(--ink); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.cs-num:focus { outline: none; border-color: var(--brand-line); box-shadow: 0 0 0 3px var(--brand-soft); }
+.cs-num:disabled { background: var(--faint); color: var(--muted); }
+.cs-adjustments { margin: 10px 12px 0; padding: 8px 10px; list-style: none; display: grid; gap: 5px; border: 1px solid var(--amber-line); background: var(--amber-soft); border-radius: 8px; font-size: 11.5px; color: var(--amber-ink); line-height: 1.5; }
+.cs-adjustments li { display: flex; align-items: flex-start; gap: 6px; }
+.cs-adjustments svg { margin-top: 2px; }
+.cs-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px; }
+.cs-hint { margin: 0; padding: 0 12px 12px; font-size: 11.5px; color: var(--muted); }
+.cs-actions .cs-hint { padding: 0; }
+
+/* ---------- Ask anything: a page, not a popover (Beta) ---------- */
+/* The thread owns the viewport below the header so the composer stays put and
+   only the conversation scrolls. Page scroll here would push the input off
+   screen the moment an answer ran long. */
+.ask-screen { display: flex; flex-direction: column; height: calc(100vh - 54px); padding-bottom: 20px; }
+.ask-screen .simple-page-header { flex: 0 0 auto; }
+.ask-screen .simple-page-header h1 { display: flex; align-items: center; gap: 9px; }
+
+.ask-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 214px minmax(0, 1fr) 236px; gap: 16px; }
+.ask-main { min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-panel); background: #fff; overflow: hidden; }
+.ask-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+.ask-welcome { margin: auto 0; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; color: var(--muted); }
+.ask-welcome-mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand-ink); }
+.ask-welcome h2 { margin: 2px 0 0; font-size: 16px; color: var(--ink); }
+.ask-welcome p { margin: 0; font-size: 13px; line-height: 1.6; max-width: 52ch; }
+
+.ask-turn { display: flex; gap: 9px; align-items: flex-start; }
+.ask-turn-you { justify-content: flex-end; }
+.ask-turn-you .ask-turn-body { background: var(--brand-soft); border-color: var(--brand-line); max-width: 78%; }
+.ask-turn-assistant .ask-turn-body { max-width: 78%; }
+.ask-turn-icon { flex: 0 0 auto; width: 24px; height: 24px; margin-top: 2px; border-radius: 50%; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand-ink); }
+.ask-turn-body { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 13px; min-width: 0; }
+.ask-turn-body p { margin: 0; font-size: 13px; line-height: 1.65; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-thinking { color: var(--muted); font-style: italic; }
+.ask-ungrounded { display: flex; align-items: flex-start; gap: 5px; margin-top: 8px !important; font-size: 11.5px !important; color: var(--amber-ink); }
+.ask-ungrounded svg { margin-top: 3px; flex: 0 0 auto; }
+.ask-goto { margin-top: 10px; height: 27px; padding: 0 12px; border: 1px solid var(--brand-line); border-radius: 99px; background: #fff; color: var(--brand-ink); font-size: 11.5px; font-weight: 600; text-transform: capitalize; }
+.ask-goto:hover { background: var(--brand-soft); }
+
+.ask-composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: #fff; flex: 0 0 auto; }
+.ask-composer textarea { flex: 1; min-height: 38px; max-height: 160px; resize: none; padding: 10px 12px; border: 1px solid #d9d9de; border-radius: var(--r-control); background: #fff; font: inherit; font-size: 13px; color: var(--ink); line-height: 1.5; }
+.ask-composer textarea:focus { outline: none; border-color: var(--brand-line); box-shadow: 0 0 0 3px var(--brand-soft); }
+.ask-send { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--brand); border-radius: var(--r-control); background: var(--brand); color: #fff; }
+.ask-send:hover:not(:disabled) { background: var(--brand-ink); border-color: var(--brand-ink); }
+.ask-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.ask-foot { margin: 9px 6px; font-size: 11px; color: var(--muted); flex: 0 0 auto; }
+
+.ask-refs { min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line-soft); border-radius: var(--r-panel); background: var(--surface); padding: 14px; }
+.ask-refs .meta-label { margin: 0 0 4px; }
+.ask-ref { display: flex; align-items: flex-start; gap: 7px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 10px; color: var(--muted); }
+.ask-ref:hover { border-color: var(--brand-line); }
+.ask-ref.is-static { background: var(--faint); border-style: dashed; }
+.ask-ref > svg { margin-top: 2px; flex: 0 0 auto; }
+.ask-ref span { min-width: 0; }
+.ask-ref strong { display: block; font-size: 12px; font-weight: 550; color: var(--ink); overflow-wrap: anywhere; }
+.ask-ref small { display: block; margin-top: 1px; font-size: 11px; color: var(--muted); text-transform: capitalize; }
+
+/* History: past conversations, newest first. */
+.ask-history { min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line-soft); border-radius: var(--r-panel); background: var(--surface); padding: 14px 12px; }
+.ask-history .meta-label { display: flex; align-items: center; gap: 5px; margin: 0 0 6px; }
+.ask-history-row { width: 100%; text-align: left; border: 1px solid transparent; border-radius: 8px; background: transparent; padding: 7px 9px; }
+.ask-history-row:hover { background: #fff; border-color: var(--line); }
+.ask-history-row.active { background: #fff; border-color: var(--brand-line); }
+.ask-history-row strong { display: block; font-size: 12px; font-weight: 550; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-history-row small { display: block; margin-top: 1px; font-size: 11px; color: var(--muted); }
+
+/* What the assistant read to answer. Collapsed by default: it is evidence for
+   anyone who wants it, not something to wade through on every reply. */
+.ask-trace { margin-top: 9px; }
+.ask-trace summary { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: pointer; list-style: none; }
+.ask-trace summary::-webkit-details-marker { display: none; }
+.ask-trace summary:hover { color: var(--brand-ink); }
+.ask-trace ul { margin: 7px 0 0; padding: 0 0 0 2px; list-style: none; display: grid; gap: 4px; }
+.ask-trace li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.ask-trace li.failed code { color: var(--amber-ink); background: var(--amber-soft); }
+.ask-trace code { font-family: var(--font-mono); font-size: 10.5px; background: var(--faint); border-radius: 4px; padding: 1px 5px; color: var(--ink); }
+.ask-trace em { font-style: normal; color: var(--amber-ink); }
+
+@media (max-width: 1180px) {
+  /* History folds away first: it is the column you need least often. */
+  .ask-layout { grid-template-columns: minmax(0, 1fr) 236px; }
+  .ask-history { display: none; }
+}
+
+@media (max-width: 980px) {
+  /* Below this the references column starves the conversation too, so both
+     move under the thread and the page scrolls normally again. */
+  .ask-screen { height: auto; }
+  .ask-layout { grid-template-columns: minmax(0, 1fr); }
+  .ask-main { min-height: 58vh; }
+}

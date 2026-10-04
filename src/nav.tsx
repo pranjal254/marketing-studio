@@ -35,6 +35,7 @@ const pagePaths: Record<PageKey, string> = {
   intake: "/intake",
   rollout: "/workflow",
   live: "/live",
+  ask: "/ask",
 };
 
 export function pathFor(target: PageKey | NavTarget): string {
@@ -69,6 +70,7 @@ export function parseNav(pathname: string, search: string): NavTarget {
     case "users": return { page: "users" };
     case "intake": return { page: "intake" };
     case "live": return { page: "live" };
+    case "ask": return { page: "ask" };
     default: return { page: "home" };
   }
 }
