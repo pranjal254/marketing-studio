@@ -25,7 +25,27 @@ export function tokenized(url: string): string {
 
 export type LiveHealth = {
   status: string; agent_id: string; config_version: string;
-  provider: string; model: string; environment: string; kill_switch: "clear" | "paused";
+  provider: string;
+  /* The model that actually answers. A deployment may substitute: dev serves
+     every agent from an Azure deployment, so this is NOT always the Claude id
+     the spec routes to. `target_model` is that routed id. */
+  model: string;
+  target_model?: string;
+  environment: string; kill_switch: "clear" | "paused";
+};
+
+/* Per-agent runtime as the bridge reports it. Used to show what is really
+   running rather than the seed data's intended Claude models. */
+export type LiveAgentRuntime = { model: string; target_model?: string };
+
+export type LiveFleetMeta = {
+  provider: string;
+  model: string;
+  target_model?: string;
+  box?: LiveAgentRuntime;
+  repurposing?: LiveAgentRuntime;
+  collaboration?: LiveAgentRuntime;
+  quality_gate?: LiveAgentRuntime;
 };
 
 export type LiveBriefField = { name: string; value: string; provenance: string };
@@ -462,6 +482,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const liveApi = {
   health: () => call<LiveHealth>("/api/health"),
+
+  /* Which models the fleet is really running, per agent. */
+  fleetMeta: () => call<LiveFleetMeta>("/api/meta"),
 
   /* Multipart upload — the browser sets the boundary Content-Type itself, so
      this cannot go through call() (which forces application/json). */

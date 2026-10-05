@@ -1,14 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, ShieldCheck } from "@phosphor-icons/react";
 import { useStore } from "../store";
 import { agentMeta, governance, stampTime } from "../data";
 import { useNav } from "../nav";
 import { Chip, Modal, Monogram } from "../ui";
+import { liveApi, type LiveFleetMeta } from "../live";
+
+/* The seed data names the models the spec routes each agent to. A deployment
+   may substitute: dev serves everything from an Azure deployment, so showing
+   the routed name would misreport what is actually answering. When the bridge
+   is reachable we show what it says is really running, and note the routed
+   target beside it; offline we fall back to the seed descriptor. */
+function useLiveRuntimes(): LiveFleetMeta | null {
+  const [meta, setMeta] = useState<LiveFleetMeta | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    liveApi
+      .fleetMeta()
+      .then((m) => { if (!cancelled) setMeta(m); })
+      .catch(() => { /* bridge down: the seed descriptor stands in */ });
+    return () => { cancelled = true; };
+  }, []);
+  return meta;
+}
+
+function runtimeFor(key: string, meta: LiveFleetMeta | null): string | null {
+  if (!meta) return null;
+  const perAgent: Record<string, { model: string } | undefined> = {
+    CI: { model: meta.model },
+    CB: meta.box,
+    CR: meta.repurposing,
+    CO: meta.collaboration,
+    QG: meta.quality_gate,
+  };
+  return perAgent[key]?.model ?? null;
+}
 
 export default function AgentsScreen() {
   const { state, now } = useStore();
   const { go } = useNav();
   const [govOpen, setGovOpen] = useState(false);
+  const fleet = useLiveRuntimes();
 
   return (
     <div className="screen-content agents-screen">
@@ -24,7 +56,21 @@ export default function AgentsScreen() {
               <div className="agent-card-top"><Monogram size="lg">{agent.key}</Monogram><Chip tone="blue">{agent.kind}</Chip></div>
               <h2>{agent.name}</h2>
               <p>{agent.purpose}</p>
-              <div className="model-line"><small>Runtime</small><strong>{agent.runtime}{agent.prompt_version ? ` · prompt ${agent.prompt_version}` : ""}</strong></div>
+              {(() => {
+                const running = runtimeFor(agent.key, fleet);
+                return (
+                  <div className="model-line">
+                    <small>Runtime</small>
+                    <strong>
+                      {running ?? agent.runtime}
+                      {agent.prompt_version ? ` · prompt ${agent.prompt_version}` : ""}
+                    </strong>
+                    {running && running !== agent.model && (
+                      <small className="model-routed">routed as {agent.runtime}</small>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="agent-stats">
                 <div><small>Autonomy</small><strong>{runs.length ? Math.round((autonomous / runs.length) * 100) : 0}%</strong></div>
                 <div><small>Runs</small><strong>{runs.length}</strong></div>

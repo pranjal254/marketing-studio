@@ -23,8 +23,18 @@ function useBoxDetail(boxId: string | undefined) {
   const [detail, setDetail] = useState<BoxDetail | null>(null);
   const [offline, setOffline] = useState(false);
   const [gone, setGone] = useState(false);
+  /* Distinct from `detail === null`, which a first load and a genuinely empty
+     plan share. Without it a slow fetch renders as "the plan is not confirmed
+     yet", which is a false statement about a campaign that is fully packaged.
+     Starts true whenever there is a campaign to fetch, so the very first paint
+     is already honest. */
+  const [loading, setLoading] = useState<boolean>(Boolean(boxId));
   const reload = useCallback(async (): Promise<BoxDetail | null> => {
-    if (!boxId) return null;
+    if (!boxId) {
+      setLoading(false);
+      return null;
+    }
+    setLoading(true);
     try {
       const d = await liveApi.boxDetail(boxId);
       setDetail(d);
@@ -35,10 +45,12 @@ function useBoxDetail(boxId: string | undefined) {
       if (e instanceof LiveApiError && e.status === 404) setGone(true);
       else setOffline(true);
       return null;
+    } finally {
+      setLoading(false);
     }
   }, [boxId]);
   useEffect(() => { void reload(); }, [reload]);
-  return { detail, offline, gone, reload };
+  return { detail, offline, gone, loading, reload };
 }
 
 function statusTone(status: string): "neutral" | "green" | "amber" | "blue" | "red" {
@@ -234,10 +246,11 @@ export function LivePlanReview({ task }: { task: Task }) {
 /* ---------- Campaign · Brief & plan: the real pack + calendar ---------- */
 
 export function LiveBoxPackPanel({ campaign }: { campaign: Campaign }) {
-  const { detail, offline, gone } = useBoxDetail(campaign.liveCampaignId);
+  const { detail, offline, gone, loading } = useBoxDetail(campaign.liveCampaignId);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   if (gone) return <GoneNote />;
   if (offline) return <OfflineNote />;
+  if (loading && !detail) return <p className="live-empty">Loading the live pack and plan…</p>;
   if (!detail?.pack) return null;
   const { summary, pack, plan } = detail;
   const packDoc = liveApi.boxDocUrl(summary.folder, detail.case.pack_doc_ref);
@@ -289,7 +302,7 @@ function latestByAsset(drafts: RepurposeDraft[]): RepurposeDraft[] {
 
 export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   const { state, actions, viewer, showToast } = useStore();
-  const { detail, offline, gone, reload } = useBoxDetail(campaign.liveCampaignId);
+  const { detail, offline, gone, loading, reload } = useBoxDetail(campaign.liveCampaignId);
   /* Which action is in flight (e.g. "confirm:linkedin_posts", "package",
      "flagship", "rework:faq_service_page") — the clicked button shows a spinner,
      every other action button is disabled until the bridge call returns. */
@@ -357,9 +370,16 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
   if (gone) return <section className="box-production-card"><GoneNote /></section>;
   if (offline) return <section className="box-production-card"><OfflineNote /></section>;
   if (!detail?.checklist) {
+    /* Loading and "no plan yet" are different things, and saying the wrong one
+       is worse than saying nothing: a packaged campaign reading "the plan is
+       not confirmed" sends people looking for a problem that is not there. */
     return (
       <section className="box-production-card">
-        <p className="live-empty">The asset checklist arrives once the plan is confirmed.</p>
+        <p className="live-empty">
+          {loading
+            ? "Loading the asset checklist…"
+            : "The asset checklist arrives once the plan is confirmed."}
+        </p>
       </section>
     );
   }

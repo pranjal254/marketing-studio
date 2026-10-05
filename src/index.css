@@ -1714,3 +1714,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .ask-layout { grid-template-columns: minmax(0, 1fr); }
   .ask-main { min-height: 58vh; }
 }
+
+/* The routed target, shown beside the model that is actually answering when a
+   deployment substitutes one for the other. */
+.model-line .model-routed { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
