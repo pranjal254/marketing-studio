@@ -244,6 +244,9 @@ export type RepurposeDetail = {
     items: { claim_id: string; kind: string; text: string; source_ref: string }[];
   } | null;
   gap_notes: RepurposeGapNote[];
+  /* Why the last run failed, in plain words, with a hint on how to recover.
+     Null unless the case status is "failed". */
+  last_error: { error_type?: string; detail?: string; hint?: string } | null;
   model: string;
 };
 

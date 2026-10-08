@@ -1431,7 +1431,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   margin: 0; padding: 6px 10px; border-left: 3px solid #12b76a; border-radius: 4px;
   background: rgba(18, 183, 106, 0.08); font-size: 13px;
 }
-.modal-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.modal-actions { display: flex; justify-content: flex-end; margin-top: 14px; gap: 6px; }
 
 /* ---------- Intake header actions + modal responsiveness ---------- */
 .intake-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

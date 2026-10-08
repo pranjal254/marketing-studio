@@ -708,7 +708,8 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
                 {rpStatus === "flagship_staged" && "Flagship staged — awaiting a Content Writer's confirmation"}
                 {rpStatus === "flagship_confirmed" && "Flagship confirmed — fan-out unlocked"}
                 {rpStatus === "derivatives_staged" && "Drafts staged for review"}
-                {(rpStatus === "escalated" || rpStatus === "failed") && "Escalated — gaps need a human"}
+                {rpStatus === "escalated" && "Escalated — gaps need a human"}
+                {rpStatus === "failed" && "Drafting failed — it can be retried"}
               </h2>
             </div>
             {rpStatus && <Chip tone={rpTone(rpStatus)}>{rpStatus.replace(/_/g, " ")}</Chip>}
@@ -726,6 +727,36 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
           )}
           {drafting && (
             <p className="live-note">The agent is generating — this panel refreshes automatically.</p>
+          )}
+          {/* A failed or escalated run is never a dead end: say WHY in plain words
+              (the bridge's last_error carries a hint) and offer the retry right
+              there. Drafts are versioned, so retrying is always safe. */}
+          {(rpStatus === "failed" || rpStatus === "escalated") && !drafting && (
+            <div className="live-note">
+              {rp?.last_error && (
+                <p>
+                  <WarningCircle size={13} />{" "}
+                  <strong>{rp.last_error.error_type ?? "Run failed"}:</strong>{" "}
+                  {rp.last_error.hint ?? "The run stopped unexpectedly."}
+                  {rp.last_error.detail && <> <small>({rp.last_error.detail})</small></>}
+                </p>
+              )}
+              {rpStatus === "escalated" && !rp?.last_error && (
+                <p>
+                  <WarningCircle size={13} /> The agent stopped and left gap notes
+                  below for a human. Fix what they name (usually missing sourced
+                  proof points), or retry to run a fresh draft.
+                </p>
+              )}
+              {canProduce ? (
+                <BusyButton kind="secondary" busy={drafting} busyLabel="Retrying…"
+                  onClick={startFlagship}>
+                  Retry flagship drafting
+                </BusyButton>
+              ) : (
+                <p><small>A Content Writer or AiCoE Admin can retry the draft.</small></p>
+              )}
+            </div>
           )}
           {/* Counts and lengths, set between the flagship confirmation and the
               fan-out. Hidden before the flagship exists (there is no plan to
