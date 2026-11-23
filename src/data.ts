@@ -16,14 +16,13 @@ export const seedPeople: Person[] = [
   // the admin Users page). IDs are stable — task routing references them.
   { id: "aicoe", name: "AiCoE Admin", initials: "AI", role: "AiCoE Admin", email: "aicoe@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "marcus", name: "Ramya Srinivasan", initials: "RS", role: "BU Campaign Lead", email: "ramya_s4@levelshift.com", status: "Active", lastActive: "Now" },
-  { id: "rishi", name: "Neeraj Vasant Sangani", initials: "NV", role: "Marketing Lead", email: "neeraj_v@levelshift.com", status: "Active", lastActive: "Now" },
+  { id: "rishi", name: "Neeraj Vasant Sangani", initials: "NV", role: "BU Campaign Lead", email: "neeraj_v@levelshift.com", status: "Active", lastActive: "Now" },
   { id: "jen", name: "Jen Cook", initials: "JC", role: "Content Writer", email: "jen.cook@levelshift.com", status: "Active", lastActive: "12 minutes ago" },
   { id: "tom", name: "Tom Smith", initials: "TS", role: "Grammar / Quality Reviewer", email: "tom.smith@levelshift.com", status: "Active", lastActive: "2 days ago" },
 ];
 
 export const roleTypes: { name: Role; gate: string; description: string }[] = [
-  { name: "BU Campaign Lead", gate: "Brief approval and final sign-off", description: "Approves the campaign brief at intake and signs off the locked package (steps 01 and 09)." },
-  { name: "Marketing Lead", gate: "Content decisions (step 05)", description: "Owns mid-journey content decisions and resolves reviewer conflicts at the collaboration gate." },
+  { name: "BU Campaign Lead", gate: "Campaign requests, brief approval, content decisions and sign-off", description: "Requests campaigns, approves the brief at intake, owns mid-journey content decisions and reviewer conflicts (step 05), and signs off the locked package (steps 01 and 09)." },
   { name: "Content Writer", gate: "Flagship confirmation (step 04)", description: "Drafts the flagship asset and confirms content before the eight-channel fan-out." },
   { name: "Grammar / Quality Reviewer", gate: "Grammar QA (step 08)", description: "Reviews routed assets for grammar and quality after the automated compliance checks." },
   { name: "AiCoE Admin", gate: "Agent governance", description: "Owns agent runtimes, guardrails and scenario promotions. Does not approve campaign content." },
@@ -56,7 +55,7 @@ export const journeySteps: { n: number; title: string; owner: string; agent: Age
   { n: 2, title: "Audience & offer", owner: "Campaign-in-a-Box", agent: "CB", gate: "BU Campaign Lead confirms pack & plan", phase: 0 },
   { n: 3, title: "Asset plan & workflow", owner: "Campaign-in-a-Box", agent: "CB", gate: "Owners confirmed", phase: 0 },
   { n: 4, title: "Content drafting", owner: "Content Repurposing", agent: "CR", gate: "Flagship confirmed", phase: 1 },
-  { n: 5, title: "Collaboration & iteration", owner: "Collaboration Agent", agent: "CO", gate: "Marketing Lead decision", phase: 1 },
+  { n: 5, title: "Collaboration & iteration", owner: "Collaboration Agent", agent: "CO", gate: "BU Campaign Lead decision", phase: 1 },
   { n: 6, title: "Campaign packaging", owner: "Packaging module", agent: "PK", gate: "Runs automatically", phase: 1 },
   { n: 7, title: "Compliance checks", owner: "Quality Gate", agent: "QG", gate: "42 rules", phase: 2 },
   { n: 8, title: "Human review routing", owner: "Quality Gate", agent: "QG", gate: "Grammar QA", phase: 2 },

@@ -14,11 +14,11 @@ export const DEFAULT_PASSWORD = "levelshift2@26";
 /* What each role sees:
    - AiCoE Admin ......... everything, incl. Users (member management) and the
                            Live agents ops console (kill switch, raw STS stream)
-   - Marketing Lead ...... requests campaigns + owns mid-journey decisions:
-                           intake, campaigns, approvals, library, insights,
-                           agents, activity, workflow map
-   - BU Campaign Lead .... approves briefs / signs off packages: same as
-                           Marketing Lead minus intake (they don't request)
+   - BU Campaign Lead .... requests campaigns, approves briefs, owns mid-journey
+                           content decisions and signs off packages: intake,
+                           campaigns, approvals, library, insights, agents,
+                           activity, workflow map. (Absorbed the former
+                           Marketing Lead role; see normalizeRole.)
    - Content Writer ...... their work only: home, campaigns, their approvals
    - Grammar / Quality ... same as writers: home, campaigns, their approvals
    - Viewer .............. read-only: home, campaigns, package library
@@ -29,25 +29,32 @@ const ROLE_PAGES: Record<Role, PageKey[]> = {
     "home", "intake", "campaigns", "agents", "approvals", "library",
     "insights", "activity", "live", "rollout", "users", "ask",
   ],
-  "Marketing Lead": [
+  "BU Campaign Lead": [
     "home", "intake", "campaigns", "agents", "approvals", "library",
     "insights", "activity", "rollout", "ask",
-  ],
-  "BU Campaign Lead": [
-    "home", "campaigns", "agents", "approvals", "library", "insights",
-    "activity", "rollout", "ask",
   ],
   "Content Writer": ["home", "campaigns", "approvals", "ask"],
   "Grammar / Quality Reviewer": ["home", "campaigns", "approvals", "ask"],
   "Viewer": ["home", "campaigns", "library", "ask"],
 };
 
+/* Roles that no longer exist, mapped to the role that absorbed them. Old users
+   rows, cached localStorage state and historic agent cases may still carry these
+   labels; everything that reads a role goes through normalizeRole. */
+const LEGACY_ROLES: Record<string, Role> = {
+  "Marketing Lead": "BU Campaign Lead",
+};
+
+export function normalizeRole(role: string): Role {
+  return LEGACY_ROLES[role] ?? (role as Role);
+}
+
 export function canAccess(role: Role, page: PageKey): boolean {
-  return ROLE_PAGES[role].includes(page);
+  return (ROLE_PAGES[normalizeRole(role)] ?? []).includes(page);
 }
 
 export function pagesFor(role: Role): PageKey[] {
-  return ROLE_PAGES[role];
+  return ROLE_PAGES[normalizeRole(role)] ?? [];
 }
 
 export function isAdmin(role: Role): boolean {

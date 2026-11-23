@@ -1,5 +1,5 @@
 /* Campaign-in-a-Box, embedded where the work actually lives:
-   - LivePlanReview: the Marketing Lead's pack + plan confirmation gate (Approvals)
+   - LivePlanReview: the BU Campaign Lead's pack + plan confirmation gate (Approvals)
    - LiveBoxPackPanel: the real pack/calendar + downloads (campaign · Brief & plan)
    - LiveProductionPanel: asset confirmation, packaging, manifest (campaign ·
      Content production)
@@ -485,7 +485,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
     } finally { setBusyAction(null); }
   }
 
-  const isLead = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+  const isLead = viewer.role === "BU Campaign Lead" || viewer.role === "AiCoE Admin";
 
   function reviewBlock(rv: ReviewAsset) {
     const assetId = rv.state.asset_id;
@@ -519,7 +519,7 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
           <div className="conflict-card" key={c.conflict_id}>
             <p className="live-note">
               <WarningCircle size={13} /> Conflicting feedback on “{c.section || "the asset"}”
-              — held for the Marketing Lead (the agent never picks a side):
+              — held for the BU Campaign Lead (the agent never picks a side):
             </p>
             {c.positions.map((p, i) => (
               <p className="review-comment" key={i}>
@@ -542,11 +542,11 @@ export function LiveProductionPanel({ campaign }: { campaign: Campaign }) {
               ) : (
                 <button className="secondary-button" disabled={busy}
                   onClick={() => { setResolveFor(c.conflict_id); setResolveText(""); }}>
-                  Resolve as Marketing Lead
+                  Resolve as BU Campaign Lead
                 </button>
               )
             ) : (
-              <p className="box-standin-note">Waiting on the Marketing Lead's decision.</p>
+              <p className="box-standin-note">Waiting on the BU Campaign Lead's decision.</p>
             )}
           </div>
         ))}

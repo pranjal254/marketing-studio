@@ -3,7 +3,7 @@ export type PageKey =
   | "library" | "insights" | "users" | "intake" | "activity" | "live" | "ask";
 
 export type Role =
-  | "Marketing Lead" | "BU Campaign Lead" | "Content Writer"
+  | "BU Campaign Lead" | "Content Writer"
   | "Grammar / Quality Reviewer" | "AiCoE Admin" | "Viewer";
 
 export type AgentKey = "CI" | "CB" | "CR" | "CO" | "QG" | "PK";
@@ -44,13 +44,13 @@ export type Campaign = {
   requesterId: string;
   ownerId: string;
   writerIds?: string[]; // Content Writers staffed on this campaign (flagship-confirm
-  // pool). Empty/undefined = every active Content Writer, until the Marketing Lead
+  // pool). Empty/undefined = every active Content Writer, until the BU Campaign Lead
   // narrows it on the campaign page.
   budgetApproved: boolean;
   state: CampaignState;
   step: number; // 1..9 journey position
   request?: string; // the original ask the brief was drafted from (AI-first intake)
-  briefVersion?: string; // v0.x while in draft with the Marketing Lead
+  briefVersion?: string; // v0.x while in draft with the BU Campaign Lead
   briefAngle?: "balanced" | "executive" | "practical";
   liveCaseId?: string; // set when this campaign is backed by a REAL agent case (bridge)
   liveCampaignId?: string; // the agent-side campaign id (cmp_…) once the brief is

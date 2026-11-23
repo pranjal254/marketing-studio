@@ -23,7 +23,7 @@ export default function ApprovalsScreen() {
   // myTasks already resolves ownership + shared-task eligibility, so select within it.
   const selected = myTasks.find((t) => t.id === selectedId) ?? myTasks[0] ?? null;
   const reviewWatch = state.tasks.filter((t) => t.status === "open" && t.kind === "review").sort((a, b) => a.createdAt - b.createdAt);
-  const canManageSla = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+  const canManageSla = viewer.role === "BU Campaign Lead" || viewer.role === "AiCoE Admin";
 
   return (
     <div className="screen-content approvals-screen">
@@ -50,7 +50,7 @@ export default function ApprovalsScreen() {
       {selected && <ChainPanel campaignId={selected.campaignId} />}
 
       <section className="sla-watch">
-        <div><h2>Turnaround watch</h2><p>Live from open review tasks. Reminders go out automatically at 50% and 90% of each review window; persistent stalls escalate to the Marketing Lead.</p></div>
+        <div><h2>Turnaround watch</h2><p>Live from open review tasks. Reminders go out automatically at 50% and 90% of each review window; persistent stalls escalate to the BU Campaign Lead.</p></div>
         <div className="sla-rows">
           {reviewWatch.length === 0 && <p className="sla-empty">No open reviews. New review tasks appear here with how much time remains.</p>}
           {reviewWatch.map((task) => {
@@ -172,7 +172,7 @@ function TaskDetail({ task }: { task: Task }) {
   ];
 
   const copy: Record<string, { heading: string; body: string; cta: string; act: () => void }> = {
-    brief_approval: { heading: "Campaign brief", body: task.liveCaseId ? "This brief was drafted and routed by the LIVE Campaign Identification agent. Your decision is recorded by the agent itself (identity + timestamp) before the journey continues; nothing advances without this gate." : "This is the complete brief: agent-drafted, verified by the Marketing Lead before it reached you, with its provenance and the original request below. Approving starts planning; nothing advances without this gate.", cta: "Approve brief", act: () => void approveLive() },
+    brief_approval: { heading: "Campaign brief", body: task.liveCaseId ? "This brief was drafted and routed by the LIVE Campaign Identification agent. Your decision is recorded by the agent itself (identity + timestamp) before the journey continues; nothing advances without this gate." : "This is the complete brief: agent-drafted, verified by the BU Campaign Lead before it reached you, with its provenance and the original request below. Approving starts planning; nothing advances without this gate.", cta: "Approve brief", act: () => void approveLive() },
     plan_confirm: { heading: "Audience & offer pack", body: "Campaign-in-a-Box proposed the audience pack, a 9-asset checklist and the workspace. The orchestrator never confirms its own output; your confirmation starts content drafting.", cta: "Confirm plan", act: () => actions.confirmPlan(task.id) },
     grammar_qa: { heading: "Final language QA", body: "All assets passed the automated gate (0 blocking findings). You are the final language gate on market-facing content; read any document below, then approve. Approval routes the package to BU sign-off.", cta: "Approve language QA", act: () => actions.grammarApprove(task.id) },
     package_signoff: { heading: "Package sign-off", body: "Every asset is content-confirmed with human identity recorded, 42 checks passed and Grammar QA is approved. Read any document below before you sign; signing off locks the package read-only in OneDrive.", cta: "Sign off & lock package", act: () => actions.signOffPackage(task.id) },
@@ -315,7 +315,7 @@ function BriefReview({ campaign, liveCaseId }: { campaign: Campaign; liveCaseId?
           <strong>{drafted ? `Drafted by Campaign Identification from ${requester?.name.split(" ")[0] ?? "the requester"}'s request` : "Validated by Campaign Identification, 9 of 9 required fields"}</strong>
           <small>
             Brief {campaign.briefVersion ?? "v1.0"}
-            {revisions.length > 0 ? ` · ${revisions.length} revision${revisions.length > 1 ? "s" : ""} by Marketing Lead directive` : ""}
+            {revisions.length > 0 ? ` · ${revisions.length} revision${revisions.length > 1 ? "s" : ""} by BU Campaign Lead directive` : ""}
             {verifier && finalised ? ` · verified and sent by ${verifier.name}, ${stampTime(finalised.ts, now)}` : ""}
           </small>
         </div>

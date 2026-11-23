@@ -26,9 +26,9 @@ type GateDef = {
 
 const GATES: GateDef[] = [
   { id: "g1", after: 1, title: "Brief approval", role: "BU Campaign Lead", matchTask: (t) => t.kind === "brief_approval" || t.kind === "gaps", matchApproval: (a) => a === "Brief approved" },
-  { id: "g3", after: 3, title: "Plan confirmation", role: "Marketing Lead", matchTask: (t) => t.kind === "plan_confirm", matchApproval: (a) => a === "Plan confirmed" },
+  { id: "g3", after: 3, title: "Plan confirmation", role: "BU Campaign Lead", matchTask: (t) => t.kind === "plan_confirm", matchApproval: (a) => a === "Plan confirmed" },
   { id: "g4", after: 4, title: "Flagship confirmation", role: "Content Writer", matchTask: (t) => t.kind === "review" && (t.assetId?.endsWith("-a0") || t.title.toLowerCase().includes("flagship")), matchApproval: (a) => a === "Flagship content confirmed" },
-  { id: "g5", after: 5, title: "Content decision", role: "Marketing Lead", matchTask: (t) => t.kind === "conflict" || (t.kind === "review" && !t.assetId?.endsWith("-a0") && !t.title.toLowerCase().includes("flagship")), matchApproval: (a) => a.startsWith("Marketing decision") || a.startsWith("Content confirmed") },
+  { id: "g5", after: 5, title: "Content decision", role: "BU Campaign Lead", matchTask: (t) => t.kind === "conflict" || (t.kind === "review" && !t.assetId?.endsWith("-a0") && !t.title.toLowerCase().includes("flagship")), matchApproval: (a) => a.startsWith("Marketing decision") || a.startsWith("Content confirmed") },
   { id: "g8", after: 8, title: "Grammar QA", role: "Grammar / Quality Reviewer", matchTask: (t) => t.kind === "grammar_qa", matchApproval: (a) => a === "Grammar QA approved" },
   { id: "g9", after: 9, title: "Package sign-off", role: "BU Campaign Lead", matchTask: (t) => t.kind === "package_signoff", matchApproval: (a) => a === "Package signed off & locked" },
 ];

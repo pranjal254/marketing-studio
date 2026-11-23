@@ -4,7 +4,7 @@ import type {
 } from "./types";
 import { SCHEMA_VERSION, buildDoc, buildSeed, bumpVersion, fakeHash, initialsOf, makeEvent, reviseDoc, seedAssetsFor, type DerivedBrief } from "./data";
 import { SEGMENT_LABEL, VERTICAL_LABEL, buildBoxSync, liveApi, LiveApiError, type BoxSyncInput } from "./live";
-import { DEFAULT_PASSWORD, isAdmin } from "./access";
+import { DEFAULT_PASSWORD, isAdmin, normalizeRole } from "./access";
 
 const AUTH_KEY = "shiftai.auth";
 
@@ -55,10 +55,10 @@ function reducer(state: AppState, action: Action): AppState {
     case "APPROVAL_ADD": return { ...state, approvals: [...state.approvals, action.approval] };
     case "NOTIF_ADD": return { ...state, notifications: [...state.notifications, action.notif] };
     case "NOTIFS_READ": return { ...state, notifications: state.notifications.map((n) => n.personId === action.personId ? { ...n, read: true } : n) };
-    case "PERSON_ADD": return { ...state, people: [...state.people, action.person] };
+    case "PERSON_ADD": return { ...state, people: [...state.people, { ...action.person, role: normalizeRole(action.person.role) }] };
     case "PERSON_PATCH": return { ...state, people: state.people.map((p) => p.id === action.id ? { ...p, ...action.patch } : p) };
     case "PERSON_REMOVE": return { ...state, people: state.people.filter((p) => p.id !== action.id) };
-    case "PEOPLE_SET": return { ...state, people: action.people };
+    case "PEOPLE_SET": return { ...state, people: action.people.map((p) => ({ ...p, role: normalizeRole(p.role) })) };
     case "VIEWAS": return { ...state, viewAsId: action.id };
     default: return state;
   }
@@ -69,7 +69,8 @@ function loadInitial(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as AppState;
-      if (parsed.schema === SCHEMA_VERSION) return parsed;
+      // Cached people may carry a retired role (e.g. "Marketing Lead"): fold it in.
+      if (parsed.schema === SCHEMA_VERSION) return { ...parsed, people: parsed.people.map((p) => ({ ...p, role: normalizeRole(p.role) })) };
     }
   } catch { /* corrupted or unavailable storage falls back to seed */ }
   return buildSeed();
@@ -150,7 +151,7 @@ function boxEventSummary(r: Record<string, unknown>): string {
     case "case_escalated": return `Escalated to ${r["shiftai.escalation.routed_to"]}: ${r["shiftai.learn.reason_code"]}`;
     case "action_taken": {
       const cls = String(r["shiftai.action.class"] ?? "");
-      if (cls === "route_for_confirmation") return "Pack + plan routed to the Marketing Lead for confirmation";
+      if (cls === "route_for_confirmation") return "Pack + plan routed to the BU Campaign Lead for confirmation";
       if (cls === "register_package_manifest") return "Campaign-in-a-Box manifest registered (hashed, pending compliance)";
       if (cls === "stage_draft") return `Draft staged in the campaign workspace: ${r["shiftai.draft.asset_id"] ?? "asset"} v${r["shiftai.draft.version"] ?? ""}`;
       if (cls === "assign_reviewers") return `Reviewers assigned from the workflow plan (due ${r["shiftai.review.due"] ?? "—"})`;
@@ -433,7 +434,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "CAMPAIGN_REMOVE", id: campaignId });
     },
 
-    /* ---- AI-first intake: the agent drafts, the Marketing Lead verifies and iterates,
+    /* ---- AI-first intake: the agent drafts, the BU Campaign Lead verifies and iterates,
        nothing is routed until sendBrief. ---- */
 
     draftBrief: (description, derived) => {
@@ -450,7 +451,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "CAMPAIGN_ADD", campaign });
       emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "parse_request", summary: "Request parsed: objective, vertical and channels extracted, gaps flagged for you", tokens: { input: 1900, output: 460 }, cost: 0.02, llm: 2600, sources: ["Your request", "Brief template v1.2"] });
       later(700, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "duplicate_check", summary: "No duplicates or conflicts found in the campaign calendar", cost: 0.01, llm: 900, sources: ["Campaign calendar"] }));
-      later(1500, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "draft_brief", summary: "Brief v0.1 drafted for your review; nothing is routed until you send it", tokens: { input: 2400, output: 1150 }, cost: 0.03, llm: 4100, state: { previous: "request_received", current: "brief_draft", reason: "Marketing Lead reviews and iterates before anything moves" }, sources: ["Quarterly plan Q3"] }));
+      later(1500, () => emit({ ts: Date.now(), trace, agent: "CI", campaignId: id, activity: "draft_brief", summary: "Brief v0.1 drafted for your review; nothing is routed until you send it", tokens: { input: 2400, output: 1150 }, cost: 0.03, llm: 4100, state: { previous: "request_received", current: "brief_draft", reason: "BU Campaign Lead reviews and iterates before anything moves" }, sources: ["Quarterly plan Q3"] }));
       return id;
     },
 
@@ -466,7 +467,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const nextVersion = bumpVersion(campaign.briefVersion ?? "v0.1");
       patch.briefVersion = nextVersion;
       dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch });
-      emit({ ts: Date.now(), trace: uid("tr"), agent: "CI", campaignId, activity: "revise_brief", summary: `Brief revised to ${nextVersion} from your directive (${aspects.join(", ").toLowerCase()})`, tokens: { input: 2100, output: 640 }, cost: 0.03, llm: 2900, sources: ["Marketing Lead directive"], state: { previous: campaign.briefVersion ?? "v0.1", current: nextVersion, reason: note || aspects.join(", ") } });
+      emit({ ts: Date.now(), trace: uid("tr"), agent: "CI", campaignId, activity: "revise_brief", summary: `Brief revised to ${nextVersion} from your directive (${aspects.join(", ").toLowerCase()})`, tokens: { input: 2100, output: 640 }, cost: 0.03, llm: 2900, sources: ["BU Campaign Lead directive"], state: { previous: campaign.briefVersion ?? "v0.1", current: nextVersion, reason: note || aspects.join(", ") } });
       showToast(`Brief revised to ${nextVersion}, still with you`);
     },
 
@@ -480,7 +481,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const trace = uid("tr");
       const lead = state.people.find((p) => p.role === "BU Campaign Lead") ?? state.people[0];
       dispatch({ type: "CAMPAIGN_PATCH", id: campaignId, patch: { state: "brief_pending_approval" } });
-      emit({ ts: Date.now(), trace, agent: "studio", campaignId, activity: "brief_finalised", summary: `Brief ${campaign.briefVersion ?? "v0.1"} verified by ${viewer.name} and released for approval`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "brief_draft", current: "brief_pending_approval", reason: "Marketing Lead verified the agent draft and filled the fields agents never infer" } });
+      emit({ ts: Date.now(), trace, agent: "studio", campaignId, activity: "brief_finalised", summary: `Brief ${campaign.briefVersion ?? "v0.1"} verified by ${viewer.name} and released for approval`, actor: { type: "human", personId: state.viewAsId }, system: false, state: { previous: "brief_draft", current: "brief_pending_approval", reason: "BU Campaign Lead verified the agent draft and filled the fields agents never infer" } });
       later(700, () => {
         emit({ ts: Date.now(), trace, agent: "CI", campaignId, activity: "route_brief_approval", summary: `Brief approval routed to ${lead.name}, due in 2 business days`, cost: 0.01 });
         addTask({ kind: "brief_approval", campaignId, title: "Approve campaign brief", detail: `Brief ${campaign.briefVersion ?? "v0.1"}, verified by ${viewer.name.split(" ")[0]} before routing`, assigneeId: lead.id, slaHours: 48 });
@@ -686,7 +687,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       showToast("Plan confirmed, content drafting started");
     },
 
-    /* Marketing Lead staffs the campaign's Content Writers. Empty = the whole
+    /* BU Campaign Lead staffs the campaign's Content Writers. Empty = the whole
        active-writer pool (default). Re-targets any open flagship_confirm task so the
        queue reflects the new staffing immediately. */
     staffWriters: (campaignId, writerIds) => {
@@ -853,7 +854,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const labels = { recommended: "Used agent-recommended direction", operational: "Chose Jen's operational-first direction", returned: "Returned with note" } as const;
       dispatch({ type: "TASK_PATCH", id: taskId, patch: { status: "done", resolution: { decision: labels[decision], byId: state.viewAsId, at: Date.now(), note } } });
       record(task.campaignId, `Marketing decision: ${labels[decision]}`, state.viewAsId, "v1.2", task.assetId);
-      emit({ ts: Date.now(), trace, agent: "studio", campaignId: task.campaignId, activity: "conflict_resolved", summary: `${labels[decision]} by ${viewer.name}`, actor: { type: "human", personId: state.viewAsId }, assetId: task.assetId, system: false, state: { previous: "in_revision", current: decision === "returned" ? "in_review" : "content_confirmed", reason: note || "Marketing Lead adjudicated the reviewer conflict" } });
+      emit({ ts: Date.now(), trace, agent: "studio", campaignId: task.campaignId, activity: "conflict_resolved", summary: `${labels[decision]} by ${viewer.name}`, actor: { type: "human", personId: state.viewAsId }, assetId: task.assetId, system: false, state: { previous: "in_revision", current: decision === "returned" ? "in_review" : "content_confirmed", reason: note || "BU Campaign Lead adjudicated the reviewer conflict" } });
       if (decision === "returned") { showToast("Returned to reviewers with your note"); return; }
       if (task.assetId) dispatch({ type: "ASSET_PATCH", id: task.assetId, patch: { state: "content_confirmed" } });
       dispatch({ type: "CAMPAIGN_PATCH", id: task.campaignId, patch: { step: 6 } });
@@ -1087,7 +1088,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           type: "PEOPLE_SET",
           people: users.map((u) => ({
             id: u.id, name: u.name, initials: initialsOf(u.name),
-            role: u.role as Person["role"], email: u.email,
+            role: normalizeRole(u.role), email: u.email,
             status: u.status as Person["status"], lastActive: "Now",
           })),
         });
@@ -1199,7 +1200,7 @@ export function isEligibleFor(task: Task, person: Person | undefined): boolean {
 }
 
 /* The Content Writers who may confirm this campaign's flagship: the staffed set if
-   the Marketing Lead has chosen one, otherwise every active Content Writer. */
+   the BU Campaign Lead has chosen one, otherwise every active Content Writer. */
 export function effectiveWriters(state: AppState, campaign: Campaign): Person[] {
   const writers = state.people.filter((p) => p.role === "Content Writer" && p.status === "Active");
   if (campaign.writerIds && campaign.writerIds.length > 0) {

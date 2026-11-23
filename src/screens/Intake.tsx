@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { useStore } from "../store";
 import { useNav } from "../nav";
+import { normalizeRole } from "../access";
 import { BusyButton, Chip, MicButton, MiniSource, Modal, Monogram, MultiSelect } from "../ui";
 import { DocPreviewModal, PreviewLink, type PreviewTarget } from "../DocPreview";
 import { InlineDots } from "../loaders";
@@ -699,10 +700,13 @@ export default function IntakeScreen() {
      language, names who decides, and offers one-click ways forward. ---- */
   if (phase === "escalated" && detail) {
     const help = detail.summary.escalation_help;
+    // Historic cases may name a retired role ("Marketing Lead"); fold it in.
+    const rolesOf = (roles: string[]) => [...new Set(roles.map(normalizeRole))];
+    const routedRole = help ? normalizeRole(help.routed_to_role) : "";
     const mayAct = (roles: string[]) =>
-      roles.length === 0 || roles.includes(viewer.role) || viewer.role === "AiCoE Admin";
+      roles.length === 0 || rolesOf(roles).includes(viewer.role) || viewer.role === "AiCoE Admin";
     const yourCall = help != null &&
-      (viewer.role === help.routed_to_role || viewer.role === "AiCoE Admin");
+      (viewer.role === routedRole || viewer.role === "AiCoE Admin");
     return (
       <div className="screen-content intake-screen">
         <section className="simple-page-header"><div><h1>The agent needs a decision</h1><p>It proposes and flags — a human decides. Nothing was routed yet.</p></div></section>
@@ -713,8 +717,8 @@ export default function IntakeScreen() {
                 <Chip tone="amber">Needs a decision</Chip>
                 <span className="escalation-owner">
                   {yourCall
-                    ? <>This one is yours — you&apos;re signed in as the <strong>{help.routed_to_role}</strong>.</>
-                    : <>Waiting on the <strong>{help.routed_to_role}</strong>. You can still edit the brief or start over.</>}
+                    ? <>This one is yours — you&apos;re signed in as the <strong>{routedRole}</strong>.</>
+                    : <>Waiting on the <strong>{routedRole}</strong>. You can still edit the brief or start over.</>}
                 </span>
               </div>
               <h2>{help.title}</h2>
@@ -745,7 +749,7 @@ export default function IntakeScreen() {
                       </button>
                     );
                   const note = !allowed && o.kind === "resolve"
-                    ? `Only the ${o.roles.join(" or ")} can take this action.`
+                    ? `Only the ${rolesOf(o.roles).join(" or ")} can take this action.`
                     : o.note;
                   return (
                     <div className="escalation-option" key={o.id}>

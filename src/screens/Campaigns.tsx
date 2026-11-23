@@ -80,7 +80,7 @@ export default function CampaignsScreen() {
   );
 }
 
-/* Marketing Lead staffs the campaign's Content Writers — the pool that may confirm
+/* BU Campaign Lead staffs the campaign's Content Writers — the pool that may confirm
    the flagship. Default (no explicit set) is every active writer; the lead can
    narrow it. Everyone sees who's staffed; only the lead/admin can change it. */
 function WriterStaffing({ campaign }: { campaign: Campaign }) {
@@ -88,7 +88,7 @@ function WriterStaffing({ campaign }: { campaign: Campaign }) {
   const allWriters = state.people.filter((p) => p.role === "Content Writer" && p.status === "Active");
   const staffed = effectiveWriters(state, campaign);
   const staffedIds = new Set(staffed.map((p) => p.id));
-  const canEdit = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+  const canEdit = viewer.role === "BU Campaign Lead" || viewer.role === "AiCoE Admin";
   const isPool = !campaign.writerIds || campaign.writerIds.length === 0;
 
   function toggle(id: string) {
@@ -197,10 +197,10 @@ function CampaignDetail({ campaign }: { campaign: Campaign }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  // Deleting a campaign is a workspace decision: Marketing Lead (or AiCoE).
+  // Deleting a campaign is a workspace decision: BU Campaign Lead (or AiCoE).
   // The bridge archives the case append-only (audit trail kept), then every
   // browser's boot reconciliation drops it.
-  const canDelete = viewer.role === "Marketing Lead" || viewer.role === "AiCoE Admin";
+  const canDelete = viewer.role === "BU Campaign Lead" || viewer.role === "AiCoE Admin";
   async function deleteCampaign() {
     setDeleting(true); setDeleteError("");
     const caseId = campaign.liveCaseId ?? campaign.id;

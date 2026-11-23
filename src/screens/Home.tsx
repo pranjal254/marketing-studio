@@ -65,11 +65,11 @@ export default function HomeScreen() {
   let actions: ReactNode;
   let showNeeds = true;
   if (role === "BU Campaign Lead") {
-    lede = "Briefs to approve and packages to sign off. Your gate opens and closes every campaign.";
+    lede = "Request campaigns, approve briefs, make content decisions and sign off packages. Your gate opens and closes every campaign.";
     tiles = orgTiles;
     actions = (<>
-      <button className="primary-button" onClick={() => go("approvals")}><SealCheck size={16} weight="bold" /> Open approvals{myTasks.length > 0 ? ` (${myTasks.length})` : ""}</button>
-      <button className="outline-button" onClick={() => go("campaigns")}><SquaresFour size={16} /> View campaigns</button>
+      <button className="primary-button" onClick={() => go("intake")}><Plus size={16} weight="bold" /> New campaign request</button>
+      <button className="outline-button" onClick={() => go("approvals")}><SealCheck size={16} /> Open approvals{myTasks.length > 0 ? ` (${myTasks.length})` : ""}</button>
     </>);
   } else if (role === "Content Writer") {
     lede = "Flagship confirmations and reviews routed to you, and the campaigns behind them.";
